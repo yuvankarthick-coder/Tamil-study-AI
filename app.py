@@ -1,10 +1,9 @@
-import base64
 import io
-import os
 import re
+import html
+from collections import Counter
 
 import streamlit as st
-from openai import OpenAI
 
 try:
     import fitz  # PyMuPDF
@@ -16,324 +15,505 @@ try:
 except ImportError:
     Image = None
 
-st.set_page_config(page_title="Tamil Study AI", page_icon="🇮🇳", layout="wide")
+
+st.set_page_config(
+    page_title="Tamil Study AI",
+    page_icon="🇮🇳",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 
 APP_NAME = "Tamil Study AI"
-DEFAULT_MODEL = "gpt-4.1-mini"
 MAX_UPLOAD_MB = 20
 MAX_PDF_PAGES = 30
-MAX_TEXT_CHARS = 45000
+MAX_TEXT_CHARS = 50000
 
-SYSTEM_PROMPT = """
-You are Tamil Study AI, a careful study assistant for Tamil-speaking students.
-Explain supplied study material in natural, simple Tamil.
-Base answers primarily on the supplied material. Never invent unsupported facts.
-If something is missing, unclear, or unreadable, say so.
-Keep important English technical terms in parentheses when useful.
-Preserve formulas, equations, units, dates, names, scientific terms, and steps.
-Do not claim an answer is guaranteed for an exam.
-"""
+# Common English -> Tamil study vocabulary. This app is deliberately
+# API-free: all processing happens inside Streamlit using local Python code.
+TERM_TRANSLATIONS = {
+    "photosynthesis": "ஒளிச்சேர்க்கை",
+    "respiration": "சுவாசம்",
+    "cell": "செல் / உயிரணு",
+    "cells": "செல்கள் / உயிரணுக்கள்",
+    "nucleus": "உட்கரு",
+    "chlorophyll": "பச்சையம்",
+    "glucose": "குளுக்கோஸ்",
+    "oxygen": "ஆக்சிஜன் / பிராணவாயு",
+    "carbon dioxide": "கார்பன் டை ஆக்சைடு",
+    "water": "நீர்",
+    "energy": "ஆற்றல்",
+    "force": "விசை",
+    "motion": "இயக்கம்",
+    "velocity": "திசைவேகம்",
+    "acceleration": "முடுக்கம்",
+    "gravity": "ஈர்ப்பு விசை",
+    "mass": "நிறை",
+    "matter": "பொருள்",
+    "atom": "அணு",
+    "molecule": "மூலக்கூறு",
+    "acid": "அமிலம்",
+    "base": "காரம்",
+    "reaction": "வினை",
+    "temperature": "வெப்பநிலை",
+    "electricity": "மின்சாரம்",
+    "current": "மின்னோட்டம்",
+    "voltage": "மின்னழுத்தம்",
+    "resistance": "மின்தடை",
+    "ecosystem": "சூழலமைப்பு",
+    "environment": "சுற்றுச்சூழல்",
+    "organism": "உயிரினம்",
+    "plant": "தாவரம்",
+    "animal": "விலங்கு",
+    "democracy": "மக்களாட்சி",
+    "government": "அரசாங்கம்",
+    "constitution": "அரசியலமைப்பு",
+    "history": "வரலாறு",
+    "geography": "புவியியல்",
+    "economics": "பொருளாதாரம்",
+    "mathematics": "கணிதம்",
+    "biology": "உயிரியல்",
+    "physics": "இயற்பியல்",
+    "chemistry": "வேதியியல்",
+}
 
 
-def secret(name, default=None):
-    try:
-        value = st.secrets.get(name)
-    except Exception:
-        value = None
-    return value or os.getenv(name, default)
-
-
-def client():
-    key = secret("OPENAI_API_KEY")
-    return OpenAI(api_key=key) if key else None
-
-
-def model_name():
-    return secret("OPENAI_MODEL", DEFAULT_MODEL)
-
-
-def clean(text):
+def clean_text(text):
     text = text.replace("\x00", " ")
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
 
-def limit_text(text):
-    text = clean(text)
-    if len(text) <= MAX_TEXT_CHARS:
+def truncate_text(text, limit=MAX_TEXT_CHARS):
+    text = clean_text(text)
+    if len(text) <= limit:
         return text
-    return text[:MAX_TEXT_CHARS].rstrip() + "\n\n[Material truncated for processing.]"
+    return text[:limit].rstrip() + "\n\n[உள்ளடக்கம் நீளமாக இருப்பதால் இங்கே சுருக்கப்பட்டுள்ளது.]"
 
 
-def pdf_text(file):
+def extract_pdf_text(uploaded):
     if fitz is None:
-        raise RuntimeError("PDF support requires PyMuPDF in requirements.txt.")
-    data = file.getvalue()
+        raise RuntimeError("PDF support requires PyMuPDF. Add PyMuPDF to requirements.txt.")
+
+    data = uploaded.getvalue()
     if len(data) > MAX_UPLOAD_MB * 1024 * 1024:
         raise ValueError(f"Please upload a file smaller than {MAX_UPLOAD_MB} MB.")
+
+    doc = fitz.open(stream=data, filetype="pdf")
     try:
-        doc = fitz.open(stream=data, filetype="pdf")
         count = len(doc)
         if count == 0:
-            raise ValueError("The PDF does not contain any pages.")
+            raise ValueError("இந்த PDF-ல் பக்கங்கள் இல்லை.")
+
         pages = min(count, MAX_PDF_PAGES)
-        text = clean("\n\n".join(doc.load_page(i).get_text("text") for i in range(pages)))
+        text = "\n\n".join(doc.load_page(i).get_text("text") for i in range(pages))
+        text = clean_text(text)
+
+        if not text:
+            raise ValueError(
+                "இந்த PDF-ல் படிக்கக்கூடிய text கிடைக்கவில்லை. "
+                "Scanned PDF என்றால் ஒரு பக்கத்தை image ஆக upload செய்யவும்."
+            )
+
+        if count > MAX_PDF_PAGES:
+            text += f"\n\n[முதல் {MAX_PDF_PAGES} பக்கங்கள் மட்டும் பயன்படுத்தப்பட்டுள்ளன.]"
+
+        return truncate_text(text), count
+    finally:
         doc.close()
-    except ValueError:
-        raise
-    except Exception as exc:
-        raise ValueError("The uploaded PDF could not be opened.") from exc
-    if not text:
-        raise ValueError("No readable text was found. For scanned PDFs, upload a page as an image.")
-    if count > MAX_PDF_PAGES:
-        text += f"\n\n[Only the first {MAX_PDF_PAGES} pages were processed from this {count}-page PDF.]"
-    return limit_text(text), count
 
 
-def image_url(file):
+def read_image(uploaded):
     if Image is None:
-        raise RuntimeError("Image support requires Pillow in requirements.txt.")
-    data = file.getvalue()
+        raise RuntimeError("Image support requires Pillow. Add Pillow to requirements.txt.")
+
+    data = uploaded.getvalue()
     if len(data) > MAX_UPLOAD_MB * 1024 * 1024:
-        raise ValueError(f"Please upload a file smaller than {MAX_UPLOAD_MB} MB.")
+        raise ValueError(f"Please upload an image smaller than {MAX_UPLOAD_MB} MB.")
+
     try:
         image = Image.open(io.BytesIO(data))
-        image.verify()
+        image.load()
+        return image.copy()
     except Exception as exc:
-        raise ValueError("The uploaded image could not be opened.") from exc
-    mime = file.type if file.type in {"image/png", "image/jpeg", "image/webp"} else "image/jpeg"
-    return f"data:{mime};base64,{base64.b64encode(data).decode()}"
+        raise ValueError("இந்த image-ஐ படிக்க முடியவில்லை.") from exc
 
 
-def ai_text(material, task):
-    ai = client()
-    if ai is None:
-        raise RuntimeError(
-            "OPENAI_API_KEY is not configured in Streamlit secrets. "
-            "Use Manage app → Settings → Secrets and add your key."
+def split_sentences(text):
+    # Works reasonably for English and Tamil punctuation.
+    parts = re.split(r"(?<=[.!?।])\s+|\n+", text)
+    return [p.strip(" -•\t") for p in parts if p.strip()]
+
+
+def tamil_explain(text):
+    sentences = split_sentences(text)
+
+    if not sentences:
+        return "விளக்கம் உருவாக்க போதுமான text இல்லை."
+
+    # Keep the student's original terminology rather than inventing facts.
+    lines = [
+        "## 📖 எளிய விளக்கம்",
+        "",
+        "கீழே கொடுக்கப்பட்டுள்ள study material-ஐ அடிப்படையாகக் கொண்டு எளிமையாகப் பிரித்துள்ளேன்.",
+        "",
+    ]
+
+    for i, sentence in enumerate(sentences[:12], 1):
+        lines.append(f"**{i}. முக்கிய கருத்து:**")
+        lines.append(f"- {sentence}")
+        lines.append("")
+
+    if len(sentences) > 12:
+        lines.append(
+            f"மேலும் {len(sentences) - 12} பகுதிகள் உள்ளன. "
+            "அவற்றை Key Points பகுதியில் பார்க்கலாம்."
         )
-    prompt = f"""
-Study material supplied by the student:
---- BEGIN MATERIAL ---
-{limit_text(material)}
---- END MATERIAL ---
 
-Task:
-{task}
+    # Add known terminology without pretending it is generated by an AI model.
+    terms = find_terms(text)
+    if terms:
+        lines.extend(["", "### 📌 முக்கிய சொற்கள்"])
+        for english, tamil in terms[:10]:
+            lines.append(f"- **{english}** — {tamil}")
 
-Respond in clear, natural Tamil. Keep important English subject terms in parentheses when useful.
-"""
-    response = ai.responses.create(model=model_name(), instructions=SYSTEM_PROMPT, input=prompt)
-    if not response.output_text:
-        raise RuntimeError("The AI returned an empty response.")
-    return response.output_text.strip()
-
-
-def ai_image(data_url, task):
-    ai = client()
-    if ai is None:
-        raise RuntimeError(
-            "OPENAI_API_KEY is not configured in Streamlit secrets. "
-            "Use Manage app → Settings → Secrets and add your key."
-        )
-    response = ai.responses.create(
-        model=model_name(),
-        instructions=SYSTEM_PROMPT,
-        input=[{
-            "role": "user",
-            "content": [
-                {"type": "input_text", "text": "Read this study material carefully. " + task},
-                {"type": "input_image", "image_url": data_url},
-            ],
-        }],
+    lines.extend(
+        [
+            "",
+            "### 🧠 நினைவில் வைத்துக்கொள்ளுங்கள்",
+            "- மேலே உள்ள விளக்கம் நீங்கள் கொடுத்த material-ல் உள்ள தகவலையே அடிப்படையாகக் கொண்டது.",
+            "- முக்கியமான பாடத் தகவல்களை textbook அல்லது ஆசிரியரிடம் சரிபார்க்கவும்.",
+        ]
     )
-    if not response.output_text:
-        raise RuntimeError("The AI returned an empty response.")
-    return response.output_text.strip()
+
+    return "\n".join(lines)
 
 
-def ask(material, image, task):
-    if image:
-        return ai_image(image, task)
-    if not material.strip():
-        raise ValueError("Please provide study material first.")
-    return ai_text(material, task)
+def find_terms(text):
+    lower = text.lower()
+    found = []
+    for english, tamil in TERM_TRANSLATIONS.items():
+        if re.search(r"\b" + re.escape(english) + r"\b", lower):
+            found.append((english.title(), tamil))
+    return found
 
 
-def clear_results():
-    for key in ("explanation", "key_points", "practice"):
-        st.session_state[key] = ""
+def key_points(text):
+    sentences = split_sentences(text)
+
+    if not sentences:
+        return "முக்கிய குறிப்புகள் உருவாக்க text இல்லை."
+
+    # Prefer sentences that look information-dense.
+    ranked = sorted(
+        enumerate(sentences),
+        key=lambda x: (
+            len(re.findall(r"\b[\w'-]+\b", x[1])),
+            len(x[1]),
+        ),
+        reverse=True,
+    )
+
+    selected = []
+    seen = set()
+
+    for _, sentence in ranked:
+        normalized = re.sub(r"\W+", "", sentence.lower())
+        if normalized and normalized not in seen:
+            selected.append(sentence)
+            seen.add(normalized)
+        if len(selected) >= 10:
+            break
+
+    terms = find_terms(text)
+
+    out = ["## 🧠 முக்கிய குறிப்புகள்", ""]
+    for sentence in selected:
+        out.append(f"- {sentence}")
+
+    if terms:
+        out.extend(["", "## 📌 முக்கிய சொற்கள்", ""])
+        for english, tamil in terms:
+            out.append(f"- **{english}** — {tamil}")
+
+    out.extend(
+        [
+            "",
+            "## ⚡ Quick Revision",
+            "",
+            "மேலே உள்ள bullet points-ஐ முதலில் படித்து, பின்னர் textbook-ஐ வைத்து revision செய்யவும்.",
+        ]
+    )
+    return "\n".join(out)
 
 
+def make_questions(text):
+    sentences = split_sentences(text)
+    if not sentences:
+        return "கேள்விகள் உருவாக்க போதுமான material இல்லை."
+
+    usable = sentences[:8]
+    out = [
+        "## ❓ Practice Questions",
+        "",
+        "### ✍️ Short Answer Questions",
+        "",
+    ]
+
+    for i, sentence in enumerate(usable[:5], 1):
+        words = re.findall(r"\b[A-Za-z][A-Za-z'-]{3,}\b", sentence)
+        topic = words[0] if words else "இந்த கருத்து"
+        out.append(f"**{i}.** `{topic}` பற்றி இந்த material என்ன கூறுகிறது?")
+        out.append(f"**Model answer:** {sentence}")
+        out.append("")
+
+    out.extend(
+        [
+            "### 🧠 Revision Questions",
+            "",
+            "1. இந்த material-ல் சொல்லப்பட்ட முக்கிய கருத்து என்ன?",
+            "2. மேலே உள்ள குறிப்புகளில் உள்ள முக்கிய சொற்களில் 3-ஐ குறிப்பிடுக.",
+            "3. Material-ல் கொடுக்கப்பட்டுள்ள தகவல்களை உங்கள் சொந்த வார்த்தைகளில் சுருக்குக.",
+            "",
+            "_குறிப்பு: இவை material-ஐ அடிப்படையாகக் கொண்ட revision questions; exam questions என்று உறுதி செய்ய முடியாது._",
+        ]
+    )
+    return "\n".join(out)
+
+
+def word_stats(text):
+    words = re.findall(r"[A-Za-z][A-Za-z'-]{2,}", text.lower())
+    common = Counter(words).most_common(8)
+    return common
+
+
+def clear_all():
+    for key in (
+        "material_text",
+        "material_name",
+        "material_source",
+        "material_image",
+        "explanation",
+        "key_points",
+        "practice",
+        "last_file_key",
+    ):
+        st.session_state.pop(key, None)
+
+
+# -------------------------------------------------------------------
 # Session state
+# -------------------------------------------------------------------
 for key, default in {
-    "material_text": "", "material_name": "", "material_source": "",
-    "image_data_url": None, "explanation": "", "key_points": "",
-    "practice": "", "last_file_key": "",
+    "material_text": "",
+    "material_name": "",
+    "material_source": "",
+    "material_image": None,
+    "explanation": "",
+    "key_points": "",
+    "practice": "",
+    "last_file_key": "",
 }.items():
-    st.session_state.setdefault(key, default)
+    if key not in st.session_state:
+        st.session_state[key] = default
 
-# Styling
-st.markdown("""
+
+# -------------------------------------------------------------------
+# UI
+# -------------------------------------------------------------------
+st.markdown(
+    """
 <style>
-#MainMenu, footer, header {visibility:hidden;}
-.hero {padding:38px 24px;border-radius:24px;background:linear-gradient(135deg,#0ea5e9,#7c3aed);color:white;text-align:center;margin-bottom:22px;}
-.hero h1 {font-size:44px;margin:0 0 8px 0;}
-.hero p {font-size:18px;margin:4px auto;max-width:760px;}
-</style>
-""", unsafe_allow_html=True)
+#MainMenu {visibility:hidden;}
+footer {visibility:hidden;}
+header {visibility:hidden;}
 
-st.markdown("""
+.hero {
+    padding: 38px 22px;
+    border-radius: 24px;
+    background: linear-gradient(135deg,#0ea5e9,#7c3aed);
+    color: white;
+    text-align: center;
+    margin-bottom: 22px;
+}
+.hero h1 {font-size: 44px; margin: 0 0 10px 0;}
+.hero p {font-size: 18px; margin: 5px auto; max-width: 760px;}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    """
 <div class="hero">
 <h1>🇮🇳 Tamil Study AI</h1>
-<p><b>Understand your lessons in simple Tamil.</b></p>
-<p>Upload study material or paste text to get explanations, key points and practice questions.</p>
+<p><b>Study smarter in simple Tamil.</b></p>
+<p>Upload your lesson or paste text. No API key required.</p>
 </div>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
-if client():
-    st.success(f"🤖 AI connected • Model: `{model_name()}`")
-else:
-    st.warning("⚠️ AI is not connected. Add OPENAI_API_KEY in Streamlit Secrets to enable AI.")
+st.success(
+    "🆓 API-free mode is active. This version does not require OpenAI, "
+    "an API key, or paid AI credits."
+)
 
 st.subheader("📚 Add your study material")
-upload_tab, text_tab = st.tabs(["📄 Upload file", "✍️ Paste text"])
+
+upload_tab, text_tab = st.tabs(["📄 Upload PDF / Image", "✍️ Paste Text"])
 
 with upload_tab:
-    st.caption(f"Maximum upload: {MAX_UPLOAD_MB} MB • PDF, PNG, JPG/JPEG, WEBP")
-    uploaded = st.file_uploader(
-        "Upload a PDF or image of your lesson/question",
-        type=["pdf", "png", "jpg", "jpeg", "webp"],
-        help=f"Maximum file size is {MAX_UPLOAD_MB} MB.",
+    st.caption(
+        f"Maximum {MAX_UPLOAD_MB} MB • PDF, PNG, JPG/JPEG, WEBP"
     )
+
+    uploaded = st.file_uploader(
+        "Upload your lesson, notes, or question",
+        type=["pdf", "png", "jpg", "jpeg", "webp"],
+    )
+
     if uploaded is not None:
-        key = f"{uploaded.name}:{uploaded.size}"
-        if key != st.session_state.last_file_key:
-            st.session_state.last_file_key = key
+        file_key = f"{uploaded.name}:{uploaded.size}"
+
+        if st.session_state.last_file_key != file_key:
+            st.session_state.last_file_key = file_key
             st.session_state.material_name = uploaded.name
-            clear_results()
+            st.session_state.explanation = ""
+            st.session_state.key_points = ""
+            st.session_state.practice = ""
+
             try:
                 if uploaded.name.lower().endswith(".pdf"):
-                    text, pages = pdf_text(uploaded)
+                    text, pages = extract_pdf_text(uploaded)
                     st.session_state.material_text = text
-                    st.session_state.image_data_url = None
+                    st.session_state.material_image = None
                     st.session_state.material_source = f"PDF • {pages} page(s)"
                 else:
                     st.session_state.material_text = ""
-                    st.session_state.image_data_url = image_url(uploaded)
+                    st.session_state.material_image = read_image(uploaded)
                     st.session_state.material_source = "Image"
+
                 st.success(f"Loaded: {uploaded.name}")
             except Exception as exc:
-                st.session_state.material_text = ""
-                st.session_state.image_data_url = None
                 st.error(str(exc))
 
 with text_tab:
     pasted = st.text_area(
         "Paste your lesson, notes, or question",
         height=220,
-        placeholder="Example: Photosynthesis is the process by which green plants make food...",
+        placeholder="Paste English or Tamil study material here...",
     )
+
     if pasted.strip():
-        value = limit_text(pasted)
-        if value != st.session_state.material_text or st.session_state.material_source != "Pasted text":
-            st.session_state.material_text = value
-            st.session_state.image_data_url = None
+        cleaned = truncate_text(pasted)
+        if cleaned != st.session_state.material_text:
+            st.session_state.material_text = cleaned
+            st.session_state.material_image = None
             st.session_state.material_name = "Pasted text"
             st.session_state.material_source = "Pasted text"
-            clear_results()
+            st.session_state.explanation = ""
+            st.session_state.key_points = ""
+            st.session_state.practice = ""
 
-has_material = bool(st.session_state.material_text.strip() or st.session_state.image_data_url)
+
+has_material = bool(
+    st.session_state.material_text.strip()
+    or st.session_state.material_image is not None
+)
 
 if has_material:
     st.divider()
     left, right = st.columns([2, 1])
+
     with left:
         st.subheader("📖 Material ready")
-        if st.session_state.material_source == "Image":
-            st.info(f"🖼️ {st.session_state.material_name} is ready for AI vision analysis.")
-            try:
-                raw = base64.b64decode(st.session_state.image_data_url.split(",", 1)[1])
-                st.image(raw, caption=st.session_state.material_name)
-            except Exception:
-                pass
+
+        if st.session_state.material_image is not None:
+            st.image(
+                st.session_state.material_image,
+                caption=st.session_state.material_name,
+                use_container_width=True,
+            )
+            st.info(
+                "Image preview loaded. Without an external AI API, "
+                "the app cannot automatically read arbitrary text from an image. "
+                "For best results, paste the image's text into the text box."
+            )
         else:
             preview = st.session_state.material_text[:1800]
             if len(st.session_state.material_text) > 1800:
                 preview += "\n..."
-            st.text_area("Extracted text preview", value=preview, height=230, disabled=True)
+            st.text_area(
+                "Material preview",
+                value=preview,
+                height=230,
+                disabled=True,
+            )
+
     with right:
         st.metric("Input", st.session_state.material_source or "Material")
         if st.session_state.material_text:
             st.metric("Characters", f"{len(st.session_state.material_text):,}")
-        st.caption("AI output can contain mistakes. Verify important academic information with your textbook or teacher.")
+
+        stats = word_stats(st.session_state.material_text)
+        if stats:
+            st.caption("Common terms")
+            st.write(", ".join(word for word, _ in stats))
+
         if st.button("🗑️ Clear material", use_container_width=True):
-            for key, default in {
-                "material_text": "", "material_name": "", "material_source": "",
-                "image_data_url": None, "explanation": "", "key_points": "",
-                "practice": "", "last_file_key": "",
-            }.items():
-                st.session_state[key] = default
+            clear_all()
             st.rerun()
 
 if has_material:
     st.divider()
-    st.subheader("✨ Learn from your material")
+    st.subheader("✨ Study Tools")
+
+    if st.session_state.material_image is not None:
+        st.warning(
+            "For this API-free version, use **Paste Text** for automatic "
+            "explanations, key points, and questions."
+        )
+
     a, b, c = st.columns(3)
+
     with a:
-        explain = st.button("📖 Explain in Tamil", use_container_width=True, type="primary")
+        explain = st.button(
+            "📖 Explain in Tamil",
+            use_container_width=True,
+            type="primary",
+            disabled=not bool(st.session_state.material_text.strip()),
+        )
+
     with b:
-        points = st.button("🧠 Key Points", use_container_width=True)
+        points = st.button(
+            "🧠 Key Points",
+            use_container_width=True,
+            disabled=not bool(st.session_state.material_text.strip()),
+        )
+
     with c:
-        practice = st.button("❓ Practice Questions", use_container_width=True)
+        practice = st.button(
+            "❓ Practice Questions",
+            use_container_width=True,
+            disabled=not bool(st.session_state.material_text.strip()),
+        )
 
     if explain:
-        with st.spinner("தமிழில் எளிய விளக்கம் உருவாக்கப்படுகிறது..."):
-            try:
-                st.session_state.explanation = ask(
-                    st.session_state.material_text, st.session_state.image_data_url,
-                    """
-Explain the lesson in simple Tamil.
-Use: a short heading, main idea, small concept sections, simple examples supported by the material,
-and a short 'நினைவில் வைத்துக்கொள்ளுங்கள்' section. Preserve formulas, equations, steps and terminology.
-Do not add unsupported facts.
-""",
-                )
-            except Exception as exc:
-                st.error(f"Could not generate the explanation: {exc}")
+        st.session_state.explanation = tamil_explain(
+            st.session_state.material_text
+        )
 
     if points:
-        with st.spinner("முக்கிய குறிப்புகள் உருவாக்கப்படுகின்றன..."):
-            try:
-                st.session_state.key_points = ask(
-                    st.session_state.material_text, st.session_state.image_data_url,
-                    """
-Create a concise study sheet based only on the material.
-Return:
-### 🧠 முக்கிய குறிப்புகள் — 5 to 10 useful bullet points
-### 📌 முக்கிய சொற்கள் — important English terms with short Tamil meanings
-### ⚡ Quick Revision — a very short summary
-Do not invent facts or terms absent from the material.
-""",
-                )
-            except Exception as exc:
-                st.error(f"Could not generate key points: {exc}")
+        st.session_state.key_points = key_points(
+            st.session_state.material_text
+        )
 
     if practice:
-        with st.spinner("பயிற்சி கேள்விகள் உருவாக்கப்படுகின்றன..."):
-            try:
-                st.session_state.practice = ask(
-                    st.session_state.material_text, st.session_state.image_data_url,
-                    """
-Create a practice set based only on the material.
-Include 5 multiple-choice questions with A-D options and the correct answer,
-5 short-answer questions with concise model answers, and 2 harder revision questions with answers.
-Keep it appropriate for a school student and do not test facts absent from the material.
-""",
-                )
-            except Exception as exc:
-                st.error(f"Could not generate practice questions: {exc}")
+        st.session_state.practice = make_questions(
+            st.session_state.material_text
+        )
+
 
 if st.session_state.explanation:
     st.divider()
@@ -351,4 +531,7 @@ if st.session_state.practice:
     st.markdown(st.session_state.practice)
 
 st.divider()
-st.caption("Tamil Study AI • Educational tool. Verify important academic information with your textbook or teacher.")
+st.caption(
+    "Tamil Study AI API-free edition • No OpenAI key required • "
+    "Educational tool only — verify important information with your textbook or teacher."
+)
