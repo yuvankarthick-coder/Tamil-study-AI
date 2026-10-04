@@ -4,8 +4,8 @@ import random
 import re
 
 # =========================================================
-# Tamil Study AI V4.1
-# Professional UI refresh • No API key required
+# Tamil Study AI V5.0
+# Subject Dashboard + Exam Revision • No API key required
 # =========================================================
 
 st.set_page_config(
@@ -145,6 +145,9 @@ defaults = {
     "flashcard_revealed": False,
     "show_home": True,
     "analysis_done": False,
+    "selected_subject": "General",
+    "subject_materials": {},
+    "revision_topic": "",
 }
 
 for key, value in defaults.items():
@@ -597,6 +600,70 @@ def load_flashcards(text):
     st.session_state.flashcard_revealed = False
 
 
+
+# =========================================================
+# V5 helpers
+# =========================================================
+
+SUBJECTS = [
+    "General",
+    "Tamil",
+    "English",
+    "Mathematics",
+    "Science",
+    "Social Science",
+]
+
+SUBJECT_ICONS = {
+    "General": "📚",
+    "Tamil": "🪷",
+    "English": "🔤",
+    "Mathematics": "➗",
+    "Science": "🔬",
+    "Social Science": "🌍",
+}
+
+
+def subject_dashboard_stats():
+    materials = st.session_state.subject_materials
+    return [
+        {
+            "subject": subject,
+            "words": len(materials.get(subject, "").split()),
+            "has_notes": bool(materials.get(subject, "")),
+        }
+        for subject in SUBJECTS
+    ]
+
+
+def save_to_subject(subject, text):
+    if text:
+        st.session_state.subject_materials[subject] = text
+        st.session_state.selected_subject = subject
+
+
+def get_current_subject_text():
+    return st.session_state.subject_materials.get(
+        st.session_state.selected_subject, ""
+    )
+
+
+def make_revision_pack(text):
+    return {
+        "summary": tamil_explanation(text),
+        "points": extract_key_points(text)[:5],
+        "practice": make_practice_questions(text)[:5],
+        "cards": make_flashcards(text)[:5],
+        "checklist": [
+            "Read the key points once without looking at the full lesson.",
+            "Explain the main idea in your own words.",
+            "Review the important vocabulary.",
+            "Try the practice questions without checking your notes.",
+            "Finish with a short Test Yourself quiz.",
+        ],
+    }
+
+
 # =========================================================
 # Sidebar
 # =========================================================
@@ -604,15 +671,34 @@ def load_flashcards(text):
 with st.sidebar:
     st.markdown("## 📚 Tamil Study AI")
     st.caption("Simple study tools • Tamil-friendly learning")
-    st.markdown('<div class="brand-pill">V4.1 • No API required</div>', unsafe_allow_html=True)
+    st.markdown('<div class="brand-pill">V5.0 • No API required</div>', unsafe_allow_html=True)
 
     st.divider()
 
     mode = st.radio(
         "Choose a study mode",
-        ["🏠 Home", "📄 Study Notes", "🃏 Flashcards", "✍️ Practice", "🎯 Test Yourself"],
+        [
+            "🏠 Home",
+            "📊 My Subjects",
+            "📄 Study Notes",
+            "📝 Exam Revision",
+            "🃏 Flashcards",
+            "✍️ Practice",
+            "🎯 Test Yourself",
+        ],
         index=0,
     )
+
+    st.divider()
+    st.markdown("### 📚 Current subject")
+
+    selected_subject = st.selectbox(
+        "Subject",
+        SUBJECTS,
+        index=SUBJECTS.index(st.session_state.selected_subject),
+        label_visibility="collapsed",
+    )
+    st.session_state.selected_subject = selected_subject
 
     st.divider()
 
@@ -721,6 +807,145 @@ if mode == "🏠 Home":
     st.info("💡 Start with **Study Notes** from the sidebar.")
 
 
+
+# =========================================================
+# MY SUBJECTS
+# =========================================================
+
+if mode == "📊 My Subjects":
+    st.title("📊 My Subjects")
+    st.write("Organize your study material by subject and quickly return to revision.")
+
+    stats = subject_dashboard_stats()
+    cols = st.columns(3)
+
+    for i, item in enumerate(stats):
+        with cols[i % 3]:
+            subject = item["subject"]
+            icon = SUBJECT_ICONS[subject]
+            status = "Notes saved" if item["has_notes"] else "No notes yet"
+            st.markdown(
+                f"""
+                <div class="feature-card">
+                    <h3>{icon} {subject}</h3>
+                    <p><b>{item["words"]}</b> words</p>
+                    <p class="small-muted">{status}</p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("---")
+    st.subheader("📌 Current subject")
+
+    subject = st.selectbox(
+        "Choose a subject to view",
+        SUBJECTS,
+        index=SUBJECTS.index(st.session_state.selected_subject),
+    )
+    st.session_state.selected_subject = subject
+
+    subject_text = st.session_state.subject_materials.get(subject, "")
+
+    if subject_text:
+        st.success(f"{SUBJECT_ICONS[subject]} {subject} notes are ready.")
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("Words", len(subject_text.split()))
+        with c2:
+            st.metric("Key points", len(extract_key_points(subject_text)))
+        with c3:
+            st.metric("Practice questions", len(make_practice_questions(subject_text)))
+
+        with st.expander("👀 Preview saved notes"):
+            st.write(
+                subject_text[:1200]
+                + ("..." if len(subject_text) > 1200 else "")
+            )
+
+        if st.button(
+            "📝 Open Exam Revision",
+            type="primary",
+            use_container_width=True,
+        ):
+            st.session_state.study_text = subject_text
+            st.session_state.revision_topic = subject
+            st.rerun()
+    else:
+        st.info(
+            f"No notes saved for {subject} yet. "
+            "Go to Study Notes, choose this subject, and analyze some material."
+        )
+
+    st.markdown("### 💡 Suggested workflow")
+    st.caption(
+        "Choose a subject → add notes → save them → use Exam Revision → finish with a quiz."
+    )
+
+
+# =========================================================
+# EXAM REVISION
+# =========================================================
+
+elif mode == "📝 Exam Revision":
+    st.title("📝 Exam Revision")
+    st.write("A focused revision session built from your saved study material.")
+
+    revision_text = get_current_subject_text() or st.session_state.study_text
+
+    if not revision_text:
+        st.info("Add and analyze study material first from Study Notes.")
+    else:
+        topic_name = st.session_state.selected_subject
+
+        st.markdown(
+            f"### 🎯 Revision pack: {SUBJECT_ICONS.get(topic_name, '📚')} {topic_name}"
+        )
+
+        pack = make_revision_pack(revision_text)
+
+        st.markdown("#### 🇮🇳 Quick Tamil explanation")
+        st.info(pack["summary"])
+
+        st.markdown("#### 🔑 Must-remember points")
+        for point in pack["points"]:
+            st.markdown(f"- {point}")
+
+        st.markdown("#### 📖 Quick vocabulary")
+        vocab = get_vocabulary(revision_text)
+
+        if vocab:
+            vc1, vc2 = st.columns(2)
+            for i, (word, meaning) in enumerate(vocab):
+                with (vc1 if i % 2 == 0 else vc2):
+                    st.markdown(f"**{word}** — {meaning}")
+        else:
+            st.caption("No special vocabulary was detected.")
+
+        st.markdown("#### 🃏 Flashcard review")
+        for question, answer in pack["cards"]:
+            with st.expander(question):
+                st.write(answer)
+
+        st.markdown("#### ✍️ Practice before the exam")
+        for i, question in enumerate(pack["practice"], 1):
+            st.markdown(f"**{i}. {question}**")
+
+        st.markdown("#### ☑️ Final revision checklist")
+        for i, item in enumerate(pack["checklist"]):
+            st.checkbox(
+                item,
+                key=f"revision_{st.session_state.quiz_version}_{i}",
+            )
+
+        st.markdown("---")
+        st.markdown("### 🎯 Ready for the final check?")
+        st.caption(
+            "Use Test Yourself from the sidebar to take a quiz on this material."
+        )
+
+
 # =========================================================
 # STUDY NOTES
 # =========================================================
@@ -728,6 +953,14 @@ if mode == "🏠 Home":
 elif mode == "📄 Study Notes":
     st.title("📄 Study Notes")
     st.write("Turn your lesson into a simple revision dashboard.")
+
+    selected_subject = st.selectbox(
+        "Save these notes under",
+        SUBJECTS,
+        index=SUBJECTS.index(st.session_state.selected_subject),
+        key="study_notes_subject",
+    )
+    st.session_state.selected_subject = selected_subject
 
     input_method = st.radio(
         "How do you want to add your study material?",
@@ -758,9 +991,13 @@ elif mode == "📄 Study Notes":
         else:
             st.session_state.study_text = text
             st.session_state.analysis_done = True
+            save_to_subject(selected_subject, text)
             load_flashcards(text)
             reset_quiz()
-            st.success("Your study material is ready!")
+            st.success(
+                f"Your study material is ready and saved under "
+                f"{SUBJECT_ICONS[selected_subject]} {selected_subject}!"
+            )
 
     if st.session_state.study_text:
         study_text = st.session_state.study_text
@@ -1063,4 +1300,4 @@ elif mode == "🎯 Test Yourself":
 # =========================================================
 
 st.markdown("---")
-st.caption("📚 Tamil Study AI • Version 4.1 • No API key required")
+st.caption("📚 Tamil Study AI • Version 5.0 • No API key required")
