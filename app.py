@@ -4,7 +4,7 @@ import random
 import re
 
 # =========================================================
-# Tamil Study AI V5.0
+# Tamil Study AI V5.1
 # Subject Dashboard + Exam Revision • No API key required
 # =========================================================
 
@@ -148,6 +148,8 @@ defaults = {
     "selected_subject": "General",
     "subject_materials": {},
     "revision_topic": "",
+    "quiz_history": [],
+    "difficult_topics": [],
 }
 
 for key, value in defaults.items():
@@ -664,6 +666,59 @@ def make_revision_pack(text):
     }
 
 
+def record_quiz_result(score, total, subject):
+    percentage = int((score / total) * 100) if total else 0
+    st.session_state.quiz_history.append({
+        "subject": subject,
+        "score": score,
+        "total": total,
+        "percentage": percentage,
+    })
+    # Keep the most recent 20 attempts so the session stays lightweight.
+    st.session_state.quiz_history = st.session_state.quiz_history[-20:]
+
+
+def progress_stats():
+    history = st.session_state.quiz_history
+    if not history:
+        return {"attempts": 0, "average": 0, "best": 0, "questions": 0}
+
+    percentages = [item["percentage"] for item in history]
+    return {
+        "attempts": len(history),
+        "average": int(sum(percentages) / len(percentages)),
+        "best": max(percentages),
+        "questions": sum(item["total"] for item in history),
+    }
+
+
+def subject_progress(subject):
+    attempts = [
+        item for item in st.session_state.quiz_history
+        if item["subject"] == subject
+    ]
+    if not attempts:
+        return {"attempts": 0, "average": 0, "best": 0}
+
+    percentages = [item["percentage"] for item in attempts]
+    return {
+        "attempts": len(attempts),
+        "average": int(sum(percentages) / len(percentages)),
+        "best": max(percentages),
+    }
+
+
+def add_difficult_topic(topic):
+    topic = topic.strip()
+    if topic and topic not in st.session_state.difficult_topics:
+        st.session_state.difficult_topics.append(topic)
+
+
+def remove_difficult_topic(topic):
+    if topic in st.session_state.difficult_topics:
+        st.session_state.difficult_topics.remove(topic)
+
+
 # =========================================================
 # Sidebar
 # =========================================================
@@ -671,7 +726,7 @@ def make_revision_pack(text):
 with st.sidebar:
     st.markdown("## 📚 Tamil Study AI")
     st.caption("Simple study tools • Tamil-friendly learning")
-    st.markdown('<div class="brand-pill">V5.0 • No API required</div>', unsafe_allow_html=True)
+    st.markdown('<div class="brand-pill">V5.1 • No API required</div>', unsafe_allow_html=True)
 
     st.divider()
 
@@ -679,6 +734,7 @@ with st.sidebar:
         "Choose a study mode",
         [
             "🏠 Home",
+            "📈 My Progress",
             "📊 My Subjects",
             "📄 Study Notes",
             "📝 Exam Revision",
@@ -705,6 +761,13 @@ with st.sidebar:
     if st.session_state.study_text:
         st.success("Study material loaded")
         st.caption(f"{len(st.session_state.study_text.split())} words")
+
+    sidebar_stats = progress_stats()
+    st.markdown("### 📈 Progress")
+    st.caption(
+        f"Quizzes: {sidebar_stats['attempts']} • "
+        f"Best: {sidebar_stats['best']}%"
+    )
 
     st.markdown("### Quick guide")
     st.caption("1. Add your notes")
@@ -806,6 +869,103 @@ if mode == "🏠 Home":
     st.markdown("---")
     st.info("💡 Start with **Study Notes** from the sidebar.")
 
+
+
+# =========================================================
+# MY PROGRESS
+# =========================================================
+
+if mode == "📈 My Progress":
+    st.title("📈 My Progress")
+    st.write("See how your quiz performance is improving across your subjects.")
+
+    stats = progress_stats()
+
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        st.metric("📝 Quizzes", stats["attempts"])
+    with m2:
+        st.metric("📊 Average", f"{stats['average']}%")
+    with m3:
+        st.metric("🏆 Best Score", f"{stats['best']}%")
+    with m4:
+        st.metric("❓ Questions", stats["questions"])
+
+    st.markdown("---")
+    st.subheader("📚 Subject Progress")
+
+    subject_cols = st.columns(3)
+    for i, subject in enumerate(SUBJECTS):
+        progress = subject_progress(subject)
+        with subject_cols[i % 3]:
+            st.markdown(
+                f"### {SUBJECT_ICONS[subject]} {subject}"
+            )
+            if progress["attempts"]:
+                st.progress(
+                    progress["average"] / 100,
+                    text=f"Average: {progress['average']}%"
+                )
+                st.caption(
+                    f"Attempts: {progress['attempts']} • "
+                    f"Best: {progress['best']}%"
+                )
+            else:
+                st.caption("No quiz attempts yet.")
+
+    st.markdown("---")
+    st.subheader("🧠 Difficult Topics")
+    st.caption("Keep topics here that you want to revise again.")
+
+    if st.session_state.difficult_topics:
+        for i, topic in enumerate(st.session_state.difficult_topics):
+            c1, c2 = st.columns([5, 1])
+            with c1:
+                st.info(f"📌 {topic}")
+            with c2:
+                if st.button("Remove", key=f"remove_topic_{i}", use_container_width=True):
+                    remove_difficult_topic(topic)
+                    st.rerun()
+    else:
+        st.caption("No difficult topics saved yet.")
+
+    topic_input = st.text_input(
+        "Add a difficult topic",
+        placeholder="Example: Algebraic equations",
+        key="progress_topic_input",
+    )
+    if st.button("➕ Save Difficult Topic", use_container_width=True):
+        if topic_input.strip():
+            add_difficult_topic(topic_input)
+            st.rerun()
+        else:
+            st.warning("Enter a topic first.")
+
+    st.markdown("---")
+    st.subheader("🕘 Quiz History")
+
+    if not st.session_state.quiz_history:
+        st.info("Complete a Test Yourself quiz and your result will appear here.")
+    else:
+        for number, attempt in enumerate(reversed(st.session_state.quiz_history), 1):
+            pct = attempt["percentage"]
+            if pct >= 80:
+                icon = "🟢"
+            elif pct >= 50:
+                icon = "🟡"
+            else:
+                icon = "🔴"
+
+            h1, h2, h3 = st.columns([3, 2, 1])
+            with h1:
+                st.markdown(
+                    f"{icon} **Attempt {number} — "
+                    f"{SUBJECT_ICONS.get(attempt['subject'], '📚')} {attempt['subject']}**"
+                )
+            with h2:
+                st.caption(f"Score: {attempt['score']}/{attempt['total']}")
+            with h3:
+                st.metric("Score", f"{pct}%")
 
 
 # =========================================================
@@ -1254,6 +1414,15 @@ elif mode == "🎯 Test Yourself":
 
                 percentage = int((score / len(questions)) * 100)
 
+                quiz_record_key = f"quiz_recorded_{st.session_state.quiz_version}"
+                if not st.session_state.get(quiz_record_key, False):
+                    record_quiz_result(
+                        score,
+                        len(questions),
+                        st.session_state.selected_subject,
+                    )
+                    st.session_state[quiz_record_key] = True
+
                 st.markdown("---")
                 st.subheader("🏆 Your Result")
 
@@ -1271,6 +1440,23 @@ elif mode == "🎯 Test Yourself":
                     st.info("Good job! Review the missed questions once more.")
                 else:
                     st.warning("Keep practicing. You can improve with another attempt!")
+
+                st.markdown("### 🧠 Mark a topic for extra revision")
+                difficult_topic = st.text_input(
+                    "Topic to revise",
+                    placeholder="Example: Photosynthesis",
+                    key=f"difficult_topic_{st.session_state.quiz_version}",
+                )
+                if st.button(
+                    "📌 Save to Difficult Topics",
+                    key=f"save_difficult_{st.session_state.quiz_version}",
+                    use_container_width=True,
+                ):
+                    if difficult_topic.strip():
+                        add_difficult_topic(difficult_topic)
+                        st.success("Saved to My Progress.")
+                    else:
+                        st.warning("Enter a topic first.")
 
                 st.markdown("### 📋 Answer Review")
 
@@ -1300,4 +1486,4 @@ elif mode == "🎯 Test Yourself":
 # =========================================================
 
 st.markdown("---")
-st.caption("📚 Tamil Study AI • Version 5.0 • No API key required")
+st.caption("📚 Tamil Study AI • Version 5.1 • No API key required")
