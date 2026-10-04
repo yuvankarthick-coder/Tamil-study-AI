@@ -1,5 +1,6 @@
 import io
 import re
+import random
 from collections import Counter
 
 import streamlit as st
@@ -478,6 +479,11 @@ def reset_results():
     st.session_state.key_points = ""
     st.session_state.practice = ""
     st.session_state.flashcards = ""
+    st.session_state.quiz_questions = []
+    st.session_state.quiz_answers = {}
+    st.session_state.quiz_started = False
+    st.session_state.quiz_submitted = False
+    st.session_state.quiz_score = None
 
 
 def clear_material():
@@ -495,6 +501,100 @@ def clear_material():
         st.session_state.pop(key, None)
 
 
+
+# ------------------------------------------------------------
+# Quiz engine — API-free and source-grounded
+# ------------------------------------------------------------
+def make_quiz(text, number_of_questions=5):
+    sentences = split_sentences(text)
+    terms = find_terms(text)
+    questions = []
+    lower = text.lower()
+
+    # Reliable questions from known vocabulary.
+    for english, tamil, meaning in terms:
+        questions.append({
+            "question": f"'{english}' என்பதன் சரியான தமிழ் பொருள் எது?",
+            "options": [tamil, "இவற்றில் எதுவும் இல்லை", "வேறு ஒரு பொதுவான சொல்", "மேலே உள்ள அனைத்தும்"],
+            "answer": tamil,
+            "explanation": meaning,
+        })
+
+    # Better questions for the common photosynthesis lesson.
+    if "photosynthesis" in lower:
+        questions.extend([
+            {
+                "question": "ஒளிச்சேர்க்கை என்பது எதைக் குறிக்கிறது?",
+                "options": [
+                    "தாவரங்கள் சூரிய ஒளியைப் பயன்படுத்தி உணவைத் தயாரிக்கும் செயல்முறை",
+                    "விலங்குகள் உணவை ஜீரணிக்கும் செயல்முறை",
+                    "நீர் ஆவியாகும் செயல்முறை",
+                    "மின்சாரம் உருவாகும் செயல்முறை",
+                ],
+                "answer": "தாவரங்கள் சூரிய ஒளியைப் பயன்படுத்தி உணவைத் தயாரிக்கும் செயல்முறை",
+                "explanation": "கொடுக்கப்பட்ட material-ல் photosynthesis-க்கு இதுவே விளக்கம்.",
+            },
+            {
+                "question": "ஒளிச்சேர்க்கையில் தாவரங்கள் எந்த வாயுவைப் பயன்படுத்துகின்றன?",
+                "options": ["கார்பன் டை ஆக்சைடு", "ஆக்சிஜன்", "நைட்ரஜன்", "ஹைட்ரஜன்"],
+                "answer": "கார்பன் டை ஆக்சைடு",
+                "explanation": "Material-ல் carbon dioxide பயன்படுத்தப்படுவதாகக் கூறப்பட்டுள்ளது.",
+            },
+        ])
+
+    if "chlorophyll" in lower:
+        questions.append({
+            "question": "பச்சையம் தாவரங்களுக்கு என்ன செய்ய உதவுகிறது?",
+            "options": ["சூரிய ஒளியை உறிஞ்ச", "நீரை உறையச் செய்ய", "மண்ணை உருவாக்க", "ஆக்சிஜனை அழிக்க"],
+            "answer": "சூரிய ஒளியை உறிஞ்ச",
+            "explanation": "Material-ல் chlorophyll சூரிய ஒளியை உறிஞ்ச உதவுகிறது என்று கூறப்பட்டுள்ளது.",
+        })
+
+    # Generic source-grounded questions. These do not invent outside facts.
+    for sentence in sentences:
+        if len(sentence) < 25:
+            continue
+        translated = translate_sentence(sentence)
+        questions.append({
+            "question": "கொடுக்கப்பட்ட study material-ன் அடிப்படையில் சரியான கருத்து எது?",
+            "options": [
+                translated,
+                "இந்த material இதற்கு மாறாக கூறுகிறது.",
+                "இந்த தகவல் material-ல் இல்லை.",
+                "மேலே உள்ள எதுவும் இல்லை.",
+            ],
+            "answer": translated,
+            "explanation": "இந்த option கொடுக்கப்பட்ட material-ன் அந்த கருத்தை அடிப்படையாகக் கொண்டது.",
+        })
+
+    unique=[]
+    seen=set()
+    for q in questions:
+        key=q["question"]
+        if key not in seen:
+            unique.append(q); seen.add(key)
+
+    random.shuffle(unique)
+    return unique[:number_of_questions]
+
+
+def start_quiz():
+    questions = make_quiz(st.session_state.material_text, st.session_state.quiz_question_count)
+    st.session_state.quiz_questions = questions
+    st.session_state.quiz_answers = {}
+    st.session_state.quiz_submitted = False
+    st.session_state.quiz_score = None
+    st.session_state.quiz_started = bool(questions)
+
+
+def grade_quiz():
+    score = 0
+    for i, question in enumerate(st.session_state.quiz_questions):
+        if st.session_state.quiz_answers.get(i) == question["answer"]:
+            score += 1
+    st.session_state.quiz_score = score
+    st.session_state.quiz_submitted = True
+
 # ------------------------------------------------------------
 # Session state
 # ------------------------------------------------------------
@@ -507,6 +607,12 @@ for key, default in {
     "key_points": "",
     "practice": "",
     "flashcards": "",
+    "quiz_questions": [],
+    "quiz_answers": {},
+    "quiz_started": False,
+    "quiz_submitted": False,
+    "quiz_score": None,
+    "quiz_question_count": 5,
     "last_file_key": "",
 }.items():
     if key not in st.session_state:
@@ -558,6 +664,8 @@ header {visibility:hidden;}
     border: 1px solid rgba(128,128,128,.22);
     margin-bottom: 10px;
 }
+
+.score { text-align:center; padding:20px; border-radius:20px; border:1px solid rgba(128,128,128,.25); margin:15px 0; }
 
 .muted {
     color: #6b7280;
@@ -816,12 +924,102 @@ if st.session_state.flashcards:
     st.markdown(st.session_state.flashcards)
 
 
+
+# ------------------------------------------------------------
+# Test Yourself / Quiz Mode
+# ------------------------------------------------------------
+if has_material and st.session_state.material_text.strip():
+    st.divider()
+    st.subheader("🎯 8. Test Yourself")
+    st.write(
+        "உங்கள் study material-ல் இருந்து multiple-choice quiz உருவாக்குங்கள். "
+        "ஒவ்வொரு கேள்விக்கும் ஒரு பதிலைத் தேர்வு செய்து Submit செய்யவும்."
+    )
+
+    qcol1, qcol2 = st.columns([1, 2])
+    with qcol1:
+        st.selectbox(
+            "Number of questions",
+            [3, 5, 7, 10],
+            index=1,
+            key="quiz_question_count",
+        )
+    with qcol2:
+        if st.button("🚀 Start Quiz", use_container_width=True, type="primary"):
+            start_quiz()
+            st.rerun()
+
+    if st.session_state.quiz_started and st.session_state.quiz_questions:
+        st.markdown("---")
+
+        if not st.session_state.quiz_submitted:
+            st.info(
+                f"📝 {len(st.session_state.quiz_questions)} questions • "
+                "ஒரு கேள்விக்கு ஒரு பதிலைத் தேர்வு செய்யவும்."
+            )
+
+            for i, question in enumerate(st.session_state.quiz_questions):
+                st.markdown(f"### Question {i + 1}")
+                st.write(question["question"])
+                selected = st.radio(
+                    "Choose your answer:",
+                    question["options"],
+                    key=f"quiz_option_{i}",
+                    label_visibility="collapsed",
+                )
+                st.session_state.quiz_answers[i] = selected
+
+            if st.button("✅ Submit Quiz", use_container_width=True, type="primary"):
+                grade_quiz()
+                st.rerun()
+
+        else:
+            score = st.session_state.quiz_score or 0
+            total = len(st.session_state.quiz_questions)
+            percentage = round((score / total) * 100) if total else 0
+
+            if percentage >= 80:
+                message = "🎉 Excellent work!"
+            elif percentage >= 60:
+                message = "👍 Good job! Keep revising."
+            else:
+                message = "📚 Keep practicing — you can improve!"
+
+            st.markdown(
+                f"""
+<div class="score">
+<h2>🏆 Your Score</h2>
+<h1>{score} / {total}</h1>
+<h3>{percentage}%</h3>
+<p>{message}</p>
+</div>
+""",
+                unsafe_allow_html=True,
+            )
+
+            st.subheader("📋 Review Answers")
+            for i, question in enumerate(st.session_state.quiz_questions):
+                chosen = st.session_state.quiz_answers.get(i)
+                if chosen == question["answer"]:
+                    st.success(f"Question {i + 1}: Correct ✅")
+                else:
+                    st.error(f"Question {i + 1}: Incorrect ❌")
+                st.write(question["question"])
+                st.write(f"**Your answer:** {chosen or 'No answer'}")
+                st.write(f"**Correct answer:** {question['answer']}")
+                st.caption(question["explanation"])
+
+            if st.button("🔄 Try Another Quiz", use_container_width=True):
+                start_quiz()
+                st.rerun()
+
+
 # ------------------------------------------------------------
 # Footer
 # ------------------------------------------------------------
 st.divider()
 st.markdown(
-    '<p class="muted">Tamil Study AI Version 2 • API-free edition • '
+    '<p class="muted">Tamil Study AI Version 3 • API-free edition • '
     'No OpenAI API key required.</p>',
     unsafe_allow_html=True,
 )
