@@ -1,263 +1,307 @@
-import random
-import re
 import streamlit as st
 import fitz
+import random
+import re
 
 st.set_page_config(page_title="Tamil Study AI", page_icon="📚", layout="wide")
 
-if "study_text" not in st.session_state:
-    st.session_state.study_text = ""
-if "analysis" not in st.session_state:
-    st.session_state.analysis = None
-if "quiz" not in st.session_state:
-    st.session_state.quiz = []
-if "quiz_started" not in st.session_state:
-    st.session_state.quiz_started = False
-if "quiz_submitted" not in st.session_state:
-    st.session_state.quiz_submitted = False
-if "quiz_answers" not in st.session_state:
-    st.session_state.quiz_answers = {}
-if "quiz_score" not in st.session_state:
-    st.session_state.quiz_score = 0
-if "quiz_count" not in st.session_state:
-    st.session_state.quiz_count = 5
-if "quiz_version" not in st.session_state:
-    st.session_state.quiz_version = 0
-
 st.markdown("""
 <style>
-.hero{padding:1.5rem;border-radius:18px;background:#f3f6fb;border:1px solid #dce4ef;margin-bottom:1.5rem}
-.card{padding:1rem;border:1px solid #e5e7eb;border-radius:14px;background:white}
+.main-title{font-size:42px;font-weight:800;margin-bottom:5px}
+.subtitle{font-size:18px;opacity:.8;margin-bottom:25px}
+.card{padding:18px;border-radius:14px;border:1px solid rgba(128,128,128,.25);margin-bottom:15px}
+.section-title{font-size:25px;font-weight:700;margin-top:15px;margin-bottom:10px}
 </style>
-<div class="hero">
-<h1>📚 Tamil Study AI</h1>
-<p>Your simple no-API study assistant for notes, revision, practice questions, flashcards and quizzes.</p>
-</div>
 """, unsafe_allow_html=True)
 
+for key, default in {
+    "quiz_questions": [], "quiz_answers": {}, "quiz_submitted": False,
+    "quiz_version": 0, "study_text": ""
+}.items():
+    if key not in st.session_state:
+        st.session_state[key] = default
+
 def clean_text(text):
-    text = text.replace("\r", "\n")
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+    return re.sub(r"\s+", " ", (text or "").replace("\x00", " ")).strip()
 
-def sentences(text):
-    return [x.strip() for x in re.split(r"(?<=[.!?।])\s+|\n+", text) if len(x.strip()) > 12]
+def extract_pdf_text(uploaded_file):
+    try:
+        doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+        text = clean_text("\n".join(page.get_text() for page in doc))
+        doc.close()
+        return text
+    except Exception as e:
+        st.error(f"Could not read the PDF: {e}")
+        return ""
 
-def subject(text):
-    t = text.lower()
+def detect_subject(text):
+    lower = text.lower()
     groups = {
-        "Biology": ["photosynthesis","cell","plant","biology","தாவரம்","உயிரியல்","ஒளிச்சேர்க்கை"],
-        "Physics": ["force","motion","energy","gravity","physics","விசை","இயக்கம்","ஆற்றல்","இயற்பியல்"],
-        "Chemistry": ["atom","molecule","element","reaction","chemistry","அணு","மூலக்கூறு","வேதியியல்"],
-        "Mathematics": ["equation","algebra","geometry","math","கணிதம்","சமன்பாடு"],
-        "Social Science": ["democracy","government","history","constitution","ஜனநாயகம்","வரலாறு","அரசு"],
-        "English": ["grammar","noun","verb","adjective","sentence","english","இலக்கணம்"]
+        "Biology":["photosynthesis","cell","plant","animal","chlorophyll","respiration","biology"],
+        "Physics":["gravity","force","motion","speed","velocity","energy","newton","mass","physics"],
+        "Chemistry":["atom","molecule","element","chemical","reaction","acid","base","oxygen","hydrogen","chemistry"],
+        "Mathematics":["equation","number","fraction","algebra","geometry","triangle","angle","mathematics","math"],
+        "History":["war","king","empire","independence","history","revolution","ancient","dynasty"],
+        "Civics":["democracy","government","constitution","citizen","election","parliament","rights"]
     }
-    scores = {k: sum(w in t for w in v) for k,v in groups.items()}
+    scores = {s: sum(w in lower for w in words) for s, words in groups.items()}
     best = max(scores, key=scores.get)
-    return best if scores[best] else "General"
+    return best if scores[best] else "General Studies"
+
+def tamil_explanation(text, subject):
+    lower = text.lower()
+    if "photosynthesis" in lower:
+        return "ஒளிச்சேர்க்கை என்பது பச்சைத் தாவரங்கள் சூரிய ஒளியைப் பயன்படுத்தி உணவை உருவாக்கும் செயல்முறையாகும். இதற்கு கார்பன் டை ஆக்சைடு, நீர் மற்றும் குளோரோஃபில் உதவுகின்றன. இந்த செயல்முறையில் ஆக்சிஜன் துணைப் பொருளாக வெளியிடப்படுகிறது."
+    if "atom" in lower:
+        return "அணு என்பது ஒரு தனிமத்தின் வேதியியல் பண்புகளைத் தக்க வைத்திருக்கும் மிகச் சிறிய அலகாகும். அணுவில் புரோட்டான், நியூட்ரான் மற்றும் எலக்ட்ரான் போன்ற துகள்கள் உள்ளன."
+    if "gravity" in lower:
+        return "ஈர்ப்பு விசை என்பது நிறை கொண்ட பொருட்களை ஒன்றை ஒன்று நோக்கி இழுக்கும் விசையாகும். பூமியின் ஈர்ப்பு விசை காரணமாக பொருட்கள் பூமியை நோக்கி விழுகின்றன."
+    if "democracy" in lower:
+        return "ஜனநாயகம் என்பது மக்கள் தங்கள் பிரதிநிதிகளைத் தேர்ந்தெடுத்து ஆட்சியில் பங்கேற்கும் ஒரு ஆட்சி முறையாகும். தேர்தல், மக்களின் பங்கேற்பு மற்றும் உரிமைகள் முக்கிய அம்சங்களாகும்."
+    return f"இந்தப் பகுதி {subject} தொடர்பான படிப்புப் பொருளாகும். கொடுக்கப்பட்ட குறிப்புகளில் உள்ள முக்கிய கருத்துகளைப் புரிந்து கொண்டு, அவற்றுக்கிடையிலான தொடர்புகளை நினைவில் வைத்துக் கொள்வது முக்கியம்."
+
+def extract_key_points(text):
+    points = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if len(s.strip()) >= 20]
+    if not points and text:
+        points = [" ".join(text.split()[:35])]
+    return points[:6]
+
+def get_vocabulary(text):
+    lower = text.lower()
+    known = {
+        "photosynthesis":"ஒளிச்சேர்க்கை","chlorophyll":"குளோரோஃபில் / பச்சையம்",
+        "glucose":"குளுக்கோஸ்","oxygen":"ஆக்சிஜன்","carbon dioxide":"கார்பன் டை ஆக்சைடு",
+        "atom":"அணு","molecule":"மூலக்கூறு","gravity":"ஈர்ப்பு விசை","force":"விசை",
+        "energy":"ஆற்றல்","democracy":"ஜனநாயகம்","government":"அரசாங்கம்",
+        "constitution":"அரசியலமைப்பு","election":"தேர்தல்"
+    }
+    found = [(w.title(), t) for w,t in known.items() if w in lower]
+    if found: return found[:8]
+    words = re.findall(r"[A-Za-z]{5,}", text)
+    seen, result = set(), []
+    for word in words:
+        if word.lower() not in seen:
+            seen.add(word.lower()); result.append((word, "பாடத்தில் வரும் முக்கிய சொல்"))
+    return result[:8]
+
+def make_flashcards(text):
+    lower = text.lower()
+    if "photosynthesis" in lower:
+        return [
+            ("What is photosynthesis?","The process by which green plants make food using sunlight."),
+            ("What pigment helps absorb sunlight?","Chlorophyll."),
+            ("What gas is released during photosynthesis?","Oxygen.")
+        ]
+    if "atom" in lower:
+        return [
+            ("What is an atom?","The smallest unit of an element that retains its chemical properties."),
+            ("Name two particles found in an atom.","Protons and electrons."),
+            ("Which particle has a negative charge?","The electron.")
+        ]
+    if "gravity" in lower:
+        return [
+            ("What is gravity?","A force that attracts masses toward one another."),
+            ("Why do objects fall toward Earth?","Because Earth's gravity attracts them."),
+            ("What does gravity do?","It attracts masses toward one another.")
+        ]
+    if "democracy" in lower:
+        return [
+            ("What is democracy?","A system of government in which people participate in choosing representatives."),
+            ("What is an important feature of democracy?","Free and fair elections."),
+            ("Why are citizens important?","They participate in the political process and exercise their rights.")
+        ]
+    return [(f"Key idea {i}", p) for i,p in enumerate(extract_key_points(text)[:5],1)]
+
+def make_practice_questions(text):
+    lower = text.lower()
+    if "photosynthesis" in lower:
+        return [
+            {"q":"Which process allows green plants to make their food?","a":"Photosynthesis","options":["Respiration","Photosynthesis","Digestion","Transpiration"]},
+            {"q":"Which pigment absorbs sunlight during photosynthesis?","a":"Chlorophyll","options":["Hemoglobin","Chlorophyll","Insulin","Keratin"]},
+            {"q":"Which gas is released as a by-product of photosynthesis?","a":"Oxygen","options":["Nitrogen","Oxygen","Hydrogen","Helium"]}
+        ]
+    if "atom" in lower:
+        return [
+            {"q":"What is the smallest unit of an element that retains its chemical properties?","a":"Atom","options":["Cell","Atom","Tissue","Organ"]},
+            {"q":"Which particle has a negative charge?","a":"Electron","options":["Proton","Neutron","Electron","Nucleus"]},
+            {"q":"Which particles are found in the nucleus of an atom?","a":"Protons and neutrons","options":["Electrons only","Protons and neutrons","Electrons and protons","Photons and electrons"]}
+        ]
+    if "gravity" in lower:
+        return [
+            {"q":"What force attracts objects toward Earth?","a":"Gravity","options":["Friction","Gravity","Magnetism","Pressure"]},
+            {"q":"Why does an object fall toward Earth?","a":"Earth's gravity attracts it","options":["Earth's gravity attracts it","The object becomes weightless","Air pushes it downward","The Sun pulls it downward"]}
+        ]
+    if "democracy" in lower:
+        return [
+            {"q":"Which is an important feature of democracy?","a":"Elections","options":["Elections","Monarchy","Censorship","Dictatorship"]},
+            {"q":"In a democracy, citizens can participate mainly by:","a":"Voting and choosing representatives","options":["Voting and choosing representatives","Avoiding elections","Removing all laws","Ending public participation"]}
+        ]
+    points = extract_key_points(text)
+    result = []
+    for i, point in enumerate(points[:4],1):
+        words = re.findall(r"[A-Za-z]{4,}", point)
+        if len(words) >= 2:
+            answer = words[-1]
+            question = point.replace(answer, "_____")
+            distractors = [w for w in words[:-1] if w.lower() != answer.lower()]
+            while len(distractors) < 3:
+                distractors.append(f"Option {len(distractors)+1}")
+            options = [answer] + distractors[:3]
+            random.shuffle(options)
+            result.append({"q":f"Complete the idea from the notes: {question}","a":answer,"options":options})
+    return result
+
+def build_quiz_questions(text, count):
+    practice = make_practice_questions(text)
+    pool = [{
+        "q":x["q"], "a":x["a"], "options":x["options"],
+        "explanation":"Review the study notes and identify the statement supported by them."
+    } for x in practice]
+    if not pool:
+        pool = [{
+            "q":"What is the main purpose of the study material you provided?",
+            "a":"To learn the topic explained in the notes",
+            "options":["To learn the topic explained in the notes","To delete the notes","To stop studying","To change the subject"],
+            "explanation":"The quiz is based on the study material supplied by the learner."
+        }]
+    selected = random.sample(pool, min(count, len(pool)))
+    while len(selected) < count:
+        selected.append(random.choice(pool).copy())
+    for item in selected:
+        item["options"] = item["options"].copy()
+        random.shuffle(item["options"])
+    return selected
 
 def reset_quiz():
-    st.session_state.quiz = []
-    st.session_state.quiz_started = False
-    st.session_state.quiz_submitted = False
-    st.session_state.quiz_answers = {}
-    st.session_state.quiz_score = 0
+    st.session_state.quiz_questions=[]
+    st.session_state.quiz_answers={}
+    st.session_state.quiz_submitted=False
     st.session_state.quiz_version += 1
 
-def build_quiz(text, count):
-    t = text.lower()
-    q = []
-    if "photosynthesis" in t or "ஒளிச்சேர்க்கை" in t:
-        q += [
-            {"q":"What is the main purpose of photosynthesis?","o":["To make food using light energy","To absorb oxygen from soil","To produce sound","To break down rocks"],"a":"To make food using light energy","e":"Green plants use light energy to make food."},
-            {"q":"Which gas is used by plants during photosynthesis?","o":["Carbon dioxide","Nitrogen","Helium","Hydrogen"],"a":"Carbon dioxide","e":"Carbon dioxide is used along with water during photosynthesis."},
-            {"q":"Which pigment captures light in photosynthesis?","o":["Chlorophyll","Hemoglobin","Keratin","Insulin"],"a":"Chlorophyll","e":"Chlorophyll is the green pigment that captures light energy."},
-            {"q":"Which substance is produced as food during photosynthesis?","o":["Glucose","Salt","Iron","Calcium"],"a":"Glucose","e":"Photosynthesis produces glucose."},
-            {"q":"Which gas is released during photosynthesis?","o":["Oxygen","Carbon dioxide","Nitrogen","Helium"],"a":"Oxygen","e":"Oxygen is released as a product of photosynthesis."},
-            {"q":"Which two raw materials are needed for photosynthesis?","o":["Carbon dioxide and water","Oxygen and salt","Nitrogen and iron","Glucose and oxygen"],"a":"Carbon dioxide and water","e":"Carbon dioxide and water are the main raw materials."}
-        ]
-    if "atom" in t or "அணு" in t:
-        q += [
-            {"q":"What is an atom?","o":["The basic unit of an element","A type of plant","A form of energy","A type of force"],"a":"The basic unit of an element","e":"An atom is the basic unit of an element."},
-            {"q":"Which particle has a negative electric charge?","o":["Electron","Proton","Neutron","Nucleus"],"a":"Electron","e":"Electrons have a negative electric charge."}
-        ]
-    if "gravity" in t or "ஈர்ப்பு" in t:
-        q += [{"q":"What does gravity do on Earth?","o":["Attracts objects toward Earth","Stops all motion","Creates light","Removes mass"],"a":"Attracts objects toward Earth","e":"Earth's gravity attracts objects toward its center."}]
-    if "democracy" in t or "ஜனநாயகம்" in t:
-        q += [{"q":"What is a key feature of democracy?","o":["People participate in choosing representatives","Only one person makes every decision","Citizens cannot influence government","Elections are never used"],"a":"People participate in choosing representatives","e":"Democracy includes participation by people in government."}]
-    if not q:
-        ss = sentences(text)
-        for s in ss[:10]:
-            words = re.findall(r"[A-Za-z]{4,}", s)
-            if len(words) >= 4:
-                answer = words[-1].strip(".,!?;:")
-                q.append({"q":f"Which term appears in this study statement?\n\n{s}","o":[answer,words[0],words[1],words[2]],"a":answer,"e":"This answer is taken from the supplied study material."})
-    if not q:
-        q = [
-            {"q":"Which habit is useful for effective studying?","o":["Reviewing material regularly","Never revisiting notes","Studying only at the last minute","Avoiding practice questions"],"a":"Reviewing material regularly","e":"Regular review helps reinforce learning."},
-            {"q":"Why are practice questions useful?","o":["To check your understanding","To avoid learning","To remove revision","To replace every lesson"],"a":"To check your understanding","e":"Practice questions help you check what you understand."}
-        ]
-    unique=[]
-    seen=set()
-    for item in q:
-        if item["q"] not in seen:
-            seen.add(item["q"])
-            item["o"] = list(item["o"])
-            random.shuffle(item["o"])
-            unique.append(item)
-    random.shuffle(unique)
-    return unique[:count]
+st.markdown('<div class="main-title">📚 Tamil Study AI</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">Your simple AI-free study assistant for notes, revision and quizzes.</div>', unsafe_allow_html=True)
 
-with st.sidebar:
-    st.header("📖 Study Assistant")
-    mode = st.radio("Mode", ["📄 Study Notes","🎯 Test Yourself"])
-    st.divider()
-    st.write("• Explain in Tamil")
-    st.write("• Key points")
-    st.write("• Practice questions")
-    st.write("• Flashcards")
-    st.write("• Vocabulary")
-    st.write("• Quiz mode")
-    st.divider()
-    st.caption("No API key required.")
+mode = st.sidebar.radio("Choose a mode:", ["📄 Study Notes","🎯 Test Yourself"])
 
-st.subheader("📥 Add your study material")
-method = st.radio("Input method", ["Paste text","Upload PDF"], horizontal=True)
-
-text = ""
-if method == "Paste text":
-    text = st.text_area("Paste your notes or textbook content here", height=220,
-                        placeholder="Example: Photosynthesis is the process by which green plants make food...")
-else:
-    file = st.file_uploader("Upload a PDF", type=["pdf"])
-    if file:
-        try:
-            doc = fitz.open(stream=file.getvalue(), filetype="pdf")
-            text = "\n".join(page.get_text("text") for page in doc).strip()
-            doc.close()
-            st.success("PDF text extracted successfully.")
-        except Exception as e:
-            st.error(f"Could not read PDF: {e}")
-
-if text:
-    st.session_state.study_text = clean_text(text)
-
-if st.session_state.study_text:
-    st.success("Study material is ready.")
-    if st.button("✨ Analyze Study Material", type="primary"):
-        ss = sentences(st.session_state.study_text)
-        points = ss[:7]
-        vocab = re.findall(r"[A-Za-z]{4,}", st.session_state.study_text.lower())
-        st.session_state.analysis = {
-            "subject": subject(st.session_state.study_text),
-            "points": points,
-            "vocab": list(dict.fromkeys(vocab))[:10],
-            "explanation": "இந்தப் பாடத்தின் முக்கிய கருத்துகளை எளிமையாகப் புரிந்துகொள்ள கீழே உள்ள குறிப்புகளைப் பயன்படுத்தலாம்."
-        }
-        reset_quiz()
-        st.rerun()
-
-if st.session_state.analysis and mode == "📄 Study Notes":
-    a = st.session_state.analysis
-    st.divider()
-    st.subheader("📚 Study Analysis")
-    c1,c2=st.columns(2)
-    with c1:
-        st.markdown("### 🏷️ Subject")
-        st.info(a["subject"])
-    with c2:
-        st.markdown("### 📝 Quick explanation")
-        st.write(a["explanation"])
-    st.markdown("### 🔑 Key Points")
-    for p in a["points"]:
-        st.markdown("- " + p)
-    st.markdown("### 🧠 Vocabulary")
-    st.write(", ".join(a["vocab"]) if a["vocab"] else "No vocabulary detected.")
-    st.markdown("### 🃏 Flashcards")
-    for i,p in enumerate(a["points"][:5],1):
-        with st.expander(f"Flashcard {i}"):
-            st.markdown("**Question:** What is the key idea?")
-            st.write(p)
-
-if mode == "🎯 Test Yourself":
-    st.divider()
-    st.subheader("🎯 Test Yourself")
-    if not st.session_state.study_text:
-        st.info("Add study material above first.")
+if mode == "📄 Study Notes":
+    st.markdown("### 📄 Add your study material")
+    input_method = st.radio("Choose input method:", ["Paste Text","Upload PDF"], horizontal=True)
+    text = ""
+    if input_method == "Paste Text":
+        text = st.text_area("Paste your notes here:", height=220, placeholder="Paste your study notes here...")
     else:
-        count = st.selectbox("Number of questions",[3,5,7,10],index=1,key="quiz_count_selector")
-        st.session_state.quiz_count = count
+        uploaded_file = st.file_uploader("Upload a PDF file", type=["pdf"])
+        if uploaded_file:
+            text = extract_pdf_text(uploaded_file)
+            if text: st.success("PDF text extracted successfully.")
 
-        if not st.session_state.quiz_started:
-            st.markdown('<div class="card"><b>Ready?</b><br>Answers will start completely unselected.</div>',unsafe_allow_html=True)
-            if st.button("🚀 Start Quiz", type="primary"):
-                st.session_state.quiz = build_quiz(st.session_state.study_text,count)
-                st.session_state.quiz_started = True
-                st.session_state.quiz_submitted = False
-                st.session_state.quiz_answers = {i:None for i in range(len(st.session_state.quiz))}
-                st.session_state.quiz_version += 1
-                st.rerun()
-        elif not st.session_state.quiz_submitted:
-            st.markdown(f"### Quiz — {len(st.session_state.quiz)} Questions")
-            unanswered=[]
-            for i,item in enumerate(st.session_state.quiz):
-                st.markdown(f"#### Question {i+1} of {len(st.session_state.quiz)}")
-                st.write(item["q"])
-
-                # VERSION 3.1 FIX:
-                # index=None prevents the first answer from being selected.
-                selected = st.radio(
-                    "Choose one answer:",
-                    item["o"],
-                    index=None,
-                    key=f"quiz_answer_{st.session_state.quiz_version}_{i}",
-                    label_visibility="collapsed"
-                )
-                st.session_state.quiz_answers[i]=selected
-                if selected is None:
-                    unanswered.append(i+1)
-                st.divider()
-
-            if unanswered:
-                st.warning("Please answer all questions before submitting. Unanswered: " + ", ".join(map(str,unanswered)))
-
-            if st.button("✅ Submit Quiz", type="primary", disabled=bool(unanswered)):
-                st.session_state.quiz_score = sum(
-                    st.session_state.quiz_answers[i] == item["a"]
-                    for i,item in enumerate(st.session_state.quiz)
-                )
-                st.session_state.quiz_submitted=True
-                st.rerun()
+    if st.button("✨ Analyze My Notes", type="primary", use_container_width=True):
+        text = clean_text(text)
+        if not text:
+            st.warning("Please paste some notes or upload a PDF first.")
         else:
-            total=len(st.session_state.quiz)
-            score=st.session_state.quiz_score
-            pct=round(score/total*100) if total else 0
-            st.success(f"🎉 You scored {score}/{total} ({pct}%)")
-            if pct >= 80:
-                st.balloons()
-            elif pct >= 50:
-                st.info("Good effort! Review the questions you missed.")
-            else:
-                st.info("Keep practicing and revise the topic again.")
+            st.session_state.study_text = text
 
-            st.markdown("### 📋 Answer Review")
-            for i,item in enumerate(st.session_state.quiz):
-                chosen=st.session_state.quiz_answers.get(i)
-                if chosen == item["a"]:
-                    st.markdown(f"#### {i+1}. ✅ Correct")
-                    st.write(f"Your answer: **{chosen}**")
-                else:
-                    st.markdown(f"#### {i+1}. ❌ Incorrect")
-                    st.write(f"Your answer: **{chosen}**")
-                    st.write(f"Correct answer: **{item['a']}**")
-                st.caption(item["e"])
-                st.divider()
+    if st.session_state.study_text:
+        study_text = st.session_state.study_text
+        subject = detect_subject(study_text)
 
-            if st.button("🔄 Try Another Quiz", type="primary"):
-                reset_quiz()
-                st.rerun()
+        st.markdown("---")
+        st.markdown("## 📊 Study Analysis")
+        c1,c2 = st.columns(2)
+        with c1:
+            st.markdown("### 📚 Subject"); st.info(subject)
+        with c2:
+            st.markdown("### 📝 Words"); st.info(str(len(study_text.split())))
 
-st.divider()
-st.caption("Tamil Study AI • Version 3.1 • No API key required")
+        st.markdown('<div class="section-title">🇮🇳 தமிழ் விளக்கம்</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="card">{tamil_explanation(study_text, subject)}</div>', unsafe_allow_html=True)
+
+        st.markdown('<div class="section-title">🔑 Key Points</div>', unsafe_allow_html=True)
+        for point in extract_key_points(study_text):
+            st.markdown(f"- {point}")
+
+        st.markdown('<div class="section-title">🧠 Vocabulary</div>', unsafe_allow_html=True)
+        for english,tamil in get_vocabulary(study_text):
+            st.markdown(f"**{english}** → {tamil}")
+
+        st.markdown('<div class="section-title">🃏 Flashcards</div>', unsafe_allow_html=True)
+        for question,answer in make_flashcards(study_text):
+            with st.expander(question): st.write(answer)
+
+        st.markdown('<div class="section-title">✍️ Practice Questions</div>', unsafe_allow_html=True)
+        practice = make_practice_questions(study_text)
+        if practice:
+            for i,item in enumerate(practice,1):
+                st.markdown(f"**{i}. {item['q']}**")
+                st.write(f"Answer: **{item['a']}**")
+                st.write("---")
+        else:
+            st.info("No practice questions could be generated from these notes.")
+
+else:
+    st.markdown("## 🎯 Test Yourself")
+    st.write("Create a multiple-choice quiz from your study material.")
+    method = st.radio("Choose input method:", ["Use current study notes","Paste new text","Upload PDF"], horizontal=True)
+    quiz_text = ""
+    if method == "Use current study notes":
+        quiz_text = st.session_state.study_text
+        if quiz_text: st.success("Using your current study notes.")
+        else: st.info("No study notes are currently loaded. Paste text or upload a PDF.")
+    elif method == "Paste new text":
+        quiz_text = st.text_area("Paste text for the quiz:", height=200)
+    else:
+        qfile = st.file_uploader("Upload a PDF for the quiz", type=["pdf"], key="quiz_pdf")
+        if qfile: quiz_text = extract_pdf_text(qfile)
+
+    count = st.selectbox("Number of questions:", [3,5,7,10])
+    if st.button("🚀 Generate Quiz", type="primary", use_container_width=True):
+        quiz_text = clean_text(quiz_text)
+        if not quiz_text:
+            st.warning("Please provide study material first.")
+        else:
+            st.session_state.quiz_questions = build_quiz_questions(quiz_text,count)
+            st.session_state.quiz_answers = {}
+            st.session_state.quiz_submitted = False
+            st.session_state.quiz_version += 1
+
+    if st.session_state.quiz_questions:
+        st.markdown("---")
+        st.markdown("### 📝 Your Quiz")
+        for i,item in enumerate(st.session_state.quiz_questions):
+            st.markdown(f"**Question {i+1}:** {item['q']}")
+            selected = st.radio("Choose one answer:", item["options"], index=None,
+                                key=f"quiz_answer_{st.session_state.quiz_version}_{i}",
+                                label_visibility="collapsed")
+            st.session_state.quiz_answers[i] = selected
+
+        all_answered = all(st.session_state.quiz_answers.get(i) is not None for i in range(len(st.session_state.quiz_questions)))
+        if not all_answered: st.info("Please answer every question before submitting.")
+        if st.button("✅ Submit Quiz", disabled=not all_answered, use_container_width=True):
+            st.session_state.quiz_submitted = True
+
+        if st.session_state.quiz_submitted:
+            score = sum(st.session_state.quiz_answers.get(i)==item["a"] for i,item in enumerate(st.session_state.quiz_questions))
+            total = len(st.session_state.quiz_questions)
+            st.markdown("---")
+            st.markdown("## 🏆 Your Result")
+            st.success(f"You scored **{score}/{total}**")
+            pct = int(score/total*100)
+            if pct == 100:
+                st.balloons(); st.success("Excellent! Perfect score! 🎉")
+            elif pct >= 70: st.success("Great job! Keep revising. 💪")
+            elif pct >= 40: st.warning("Good attempt. A little more revision will help. 📖")
+            else: st.info("Keep practicing. You can improve with another attempt. 🔁")
+            st.markdown("## 🔍 Answer Review")
+            for i,item in enumerate(st.session_state.quiz_questions):
+                user_answer = st.session_state.quiz_answers.get(i)
+                if user_answer == item["a"]: st.success(f"Question {i+1}: Correct")
+                else: st.error(f"Question {i+1}: Incorrect")
+                st.write(f"Your answer: **{user_answer}**")
+                st.write(f"Correct answer: **{item['a']}**")
+                st.caption(item["explanation"])
+            if st.button("🔄 Try Another Quiz", use_container_width=True):
+                reset_quiz(); st.rerun()
+
+st.markdown("---")
+st.caption("Tamil Study AI • Version 3.2 • No API key required")
