@@ -1,11 +1,18 @@
 import streamlit as st
-import fitz
-import random
 import re
+import random
+from datetime import datetime
+
+# Optional PDF support
+try:
+    import fitz  # PyMuPDF
+    PDF_AVAILABLE = True
+except Exception:
+    PDF_AVAILABLE = False
+
 
 # =========================================================
-# Tamil Study AI V5.1
-# Subject Dashboard + Exam Revision • No API key required
+# PAGE CONFIG
 # =========================================================
 
 st.set_page_config(
@@ -15,149 +22,168 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# -------------------------
-# CSS
-# -------------------------
+
+# =========================================================
+# CUSTOM CSS
+# =========================================================
+
 st.markdown(
     """
     <style>
+
     .main {
-        padding-top: 1rem;
+        background: #f7f8fc;
     }
 
     .hero {
-        padding: 2.2rem 2rem;
-        border-radius: 24px;
-        border: 1px solid rgba(128,128,128,.20);
+        padding: 2rem;
+        border-radius: 22px;
+        background: linear-gradient(
+            135deg,
+            #eef2ff 0%,
+            #f8fafc 55%,
+            #ecfeff 100%
+        );
+        border: 1px solid #e2e8f0;
         margin-bottom: 1.5rem;
     }
 
     .hero h1 {
-        font-size: 3rem;
-        margin-bottom: .35rem;
+        margin-bottom: 0.35rem;
+        font-size: 2.4rem;
     }
 
     .hero p {
-        font-size: 1.15rem;
-        opacity: .82;
-        margin-bottom: 0;
+        font-size: 1.05rem;
+        color: #475569;
+        margin-bottom: 0.3rem;
     }
 
-    .feature-card {
-        padding: 1.2rem;
+    .card {
+        background: white;
+        border: 1px solid #e2e8f0;
         border-radius: 18px;
-        border: 1px solid rgba(128,128,128,.20);
-        min-height: 145px;
-        margin-bottom: 1rem;
+        padding: 1.2rem;
+        margin: 0.7rem 0;
+        box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
     }
 
-    .feature-card h3 {
-        margin-top: 0;
-    }
-
-    .section-title {
-        margin-top: 1rem;
-        margin-bottom: .5rem;
-    }
-
-    .stat-card {
+    .question-box {
+        background: white;
+        border: 1px solid #e2e8f0;
+        border-radius: 15px;
         padding: 1rem;
-        border-radius: 16px;
-        border: 1px solid rgba(128,128,128,.20);
-        text-align: center;
-    }
-
-    .stat-number {
-        font-size: 1.7rem;
-        font-weight: 700;
+        margin: 0.65rem 0;
     }
 
     .flashcard {
-        padding: 1.5rem;
-        border-radius: 20px;
-        border: 1px solid rgba(128,128,128,.25);
         min-height: 190px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+        background: white;
+        border: 2px solid #e2e8f0;
+        border-radius: 20px;
+        padding: 2rem;
     }
 
-    .small-muted {
-        opacity: .7;
-        font-size: .9rem;
+    .flashcard .front {
+        font-size: 1.35rem;
+        font-weight: 700;
     }
 
-    footer {
-        visibility: hidden;
+    .flashcard .back {
+        margin-top: 1rem;
+        color: #475569;
+        font-size: 1.05rem;
     }
 
-    .brand-pill {
+    .tag {
         display: inline-block;
-        padding: .35rem .75rem;
+        padding: 0.25rem 0.55rem;
         border-radius: 999px;
-        border: 1px solid rgba(128,128,128,.22);
-        font-size: .82rem;
-        margin-bottom: .8rem;
+        background: #eef2ff;
+        margin: 0.15rem;
+        font-size: 0.82rem;
     }
 
-    .hero-badge {
-        font-size: .9rem;
-        font-weight: 600;
-        opacity: .78;
-        margin-bottom: .6rem;
+    .footer {
+        text-align: center;
+        color: #94a3b8;
+        padding: 2rem 0 1rem;
+        font-size: 0.85rem;
     }
 
-    .feature-card p {
-        line-height: 1.55;
-    }
-
-    @media (max-width: 700px) {
-        .hero {
-            padding: 1.4rem 1.1rem;
-            border-radius: 18px;
-        }
-
-        .hero h1 {
-            font-size: 2.15rem;
-        }
-
-        .hero p {
-            font-size: 1rem;
-        }
-
-        .feature-card {
-            min-height: auto;
-        }
-    }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# -------------------------
-# Session state
-# -------------------------
+
+# =========================================================
+# CONSTANTS
+# =========================================================
+
+SUBJECTS = [
+    "Tamil",
+    "English",
+    "Mathematics",
+    "Science",
+    "Social Science",
+    "Computer Science",
+    "General",
+]
+
+EXAM_GOALS = [
+    "General Revision",
+    "Unit Test",
+    "Quarterly",
+    "Half-Yearly",
+    "Annual Exam",
+    "Exam Tomorrow",
+]
+
+
+# =========================================================
+# SESSION STATE
+# =========================================================
+
 defaults = {
-    "quiz_questions": [],
-    "quiz_answers": {},
-    "quiz_submitted": False,
-    "quiz_version": 0,
+    "page": "Home",
+
+    "profile": {
+        "class": "10",
+        "board": "Tamil Nadu State Board",
+        "medium": "Tamil Medium",
+        "subject": "Science",
+        "exam": "General Revision",
+    },
+
     "study_text": "",
+    "chapter_title": "",
+    "source_name": "",
+
+    "exam_pack": None,
+
     "flashcards": [],
     "flashcard_index": 0,
     "flashcard_revealed": False,
-    "show_home": True,
-    "analysis_done": False,
-    "selected_subject": "General",
-    "subject_materials": {},
-    "revision_topic": "",
+
+    "quiz_questions": [],
+    "quiz_answers": {},
+    "quiz_submitted": False,
+    "quiz_result_recorded": False,
+    "quiz_version": 0,
+
     "quiz_history": [],
+
+    "bookmarks": [],
     "difficult_topics": [],
-    "plan": "Free",
-    "usage": {
-        "study_notes": 0,
-        "practice": 0,
-        "flashcards": 0,
-        "quizzes": 0,
-        "revision": 0,
-    },
+
+    "study_sessions": 0,
+    "completed_packs": 0,
 }
 
 for key, value in defaults.items():
@@ -166,1460 +192,2414 @@ for key, value in defaults.items():
 
 
 # =========================================================
-# Helpers
+# TEXT HELPERS
 # =========================================================
 
 def clean_text(text):
     if not text:
         return ""
+
     text = text.replace("\x00", " ")
     text = re.sub(r"\s+", " ", text)
+
     return text.strip()
 
 
+def sentences_from_text(text):
+    text = clean_text(text)
+
+    if not text:
+        return []
+
+    parts = re.split(
+        r"(?<=[.!?。！？])\s+|\n+",
+        text
+    )
+
+    return [
+        part.strip()
+        for part in parts
+        if len(part.strip()) > 20
+    ]
+
+
+def words(text):
+    return re.findall(
+        r"[A-Za-zÀ-ÿ\u0B80-\u0BFF0-9]+",
+        text or ""
+    )
+
+
+def word_count(text):
+    return len(words(text))
+
+
+def safe_title(text, fallback="Untitled Chapter"):
+    text = clean_text(text)
+
+    if not text:
+        return fallback
+
+    first = re.split(
+        r"[.!?\n]",
+        text
+    )[0].strip()
+
+    if len(first) > 80:
+        first = first[:80].rsplit(" ", 1)[0]
+
+    return first.title()
+
+
+# =========================================================
+# PDF
+# =========================================================
+
 def extract_pdf_text(uploaded_file):
+
+    if not PDF_AVAILABLE:
+        return ""
+
     try:
         data = uploaded_file.read()
-        doc = fitz.open(stream=data, filetype="pdf")
+
+        document = fitz.open(
+            stream=data,
+            filetype="pdf"
+        )
+
         pages = []
-        for page in doc:
+
+        for page in document:
             pages.append(page.get_text())
-        doc.close()
-        return clean_text("\n".join(pages))
-    except Exception as e:
-        st.error(f"Could not read PDF: {e}")
+
+        document.close()
+
+        return clean_text(
+            "\n".join(pages)
+        )
+
+    except Exception:
         return ""
 
 
-def detect_subject(text):
-    lower = text.lower()
+# =========================================================
+# KEY POINT EXTRACTION
+# =========================================================
 
-    biology = [
-        "photosynthesis", "chlorophyll", "cell", "plant", "biology",
-        "respiration", "ecosystem", "mitosis", "dna", "organism"
-    ]
-    physics = [
-        "gravity", "force", "motion", "velocity", "acceleration",
-        "energy", "friction", "newton", "physics", "mass"
-    ]
-    chemistry = [
-        "atom", "molecule", "chemical", "element", "reaction",
-        "acid", "base", "electron", "proton", "chemistry"
-    ]
-    history = [
-        "king", "empire", "war", "independence", "history",
-        "dynasty", "revolution", "chola", "pandya", "mughal"
-    ]
-    civics = [
-        "democracy", "government", "constitution", "citizen",
-        "election", "parliament", "rights", "politics"
-    ]
-    mathematics = [
-        "equation", "algebra", "geometry", "triangle", "fraction",
-        "percentage", "integer", "mathematics", "math"
-    ]
-    geography = [
-        "climate", "river", "mountain", "soil", "continent",
-        "latitude", "longitude", "geography", "rainfall"
-    ]
+def extract_key_points(text, limit=10):
 
-    groups = [
-        ("Biology", biology),
-        ("Physics", physics),
-        ("Chemistry", chemistry),
-        ("History", history),
-        ("Civics", civics),
-        ("Mathematics", mathematics),
-        ("Geography", geography),
+    sentences = sentences_from_text(text)
+
+    if not sentences:
+        return []
+
+    keywords = [
+        "important",
+        "main",
+        "defined",
+        "means",
+        "because",
+        "therefore",
+        "process",
+        "function",
+        "causes",
+        "result",
+        "used",
+        "called",
+        "known",
+        "consists",
+        "includes",
+
+        "முக்கிய",
+        "என்பது",
+        "ஆகும்",
+        "காரணம்",
+        "செயல்முறை",
+        "பயன்பாடு",
+        "வகைகள்",
+        "வரையறை",
     ]
 
-    scores = [(name, sum(1 for word in words if word in lower)) for name, words in groups]
-    best = max(scores, key=lambda x: x[1])
+    scored = []
 
-    return best[0] if best[1] > 0 else "General Studies"
+    for index, sentence in enumerate(sentences):
 
+        score = 0
 
-def tamil_explanation(text):
-    lower = text.lower()
+        lower = sentence.lower()
 
-    if "photosynthesis" in lower:
-        return (
-            "ஒளிச்சேர்க்கை என்பது பச்சைத் தாவரங்கள் சூரிய ஒளியின் உதவியுடன் "
-            "தங்களுக்கு தேவையான உணவை உருவாக்கும் செயல்முறையாகும். "
-            "இதில் கார்பன் டைஆக்சைடு மற்றும் நீர் பயன்படுத்தப்படுகின்றன. "
-            "குளோரோபில் சூரிய ஒளியை உறிஞ்ச உதவுகிறது. "
-            "இதன் மூலம் குளுக்கோஸ் உருவாகிறது; ஆக்சிஜன் துணைப் பொருளாக வெளியிடப்படுகிறது."
-        )
+        for keyword in keywords:
 
-    if "atom" in lower:
-        return (
-            "அணு என்பது ஒரு தனிமத்தின் வேதியியல் பண்புகளைத் தக்க வைத்திருக்கும் "
-            "மிகச் சிறிய அலகாகும். அணுவில் புரோட்டான், நியூட்ரான் மற்றும் "
-            "எலக்ட்ரான் போன்ற துணை அணுத் துகள்கள் உள்ளன."
-        )
+            if keyword in lower:
+                score += 2
 
-    if "gravity" in lower:
-        return (
-            "ஈர்ப்பு விசை என்பது நிறை கொண்ட பொருட்கள் ஒன்றை ஒன்று ஈர்க்கும் "
-            "விசையாகும். பூமியின் ஈர்ப்பு விசை பொருட்களை பூமியின் மையத்தை நோக்கி "
-            "இழுக்கிறது. இதனால் பொருட்கள் கீழே விழுகின்றன."
-        )
+        if 45 <= len(sentence) <= 240:
+            score += 1
 
-    if "democracy" in lower:
-        return (
-            "ஜனநாயகம் என்பது மக்கள் தங்கள் பிரதிநிதிகளைத் தேர்ந்தெடுத்து "
-            "ஆட்சியில் பங்கேற்கும் ஒரு ஆட்சி முறையாகும். இதில் மக்கள் வாக்குரிமை, "
-            "சமத்துவம் மற்றும் பிரதிநிதித்துவம் போன்ற கொள்கைகள் முக்கியமானவை."
-        )
-
-    sentences = re.split(r"(?<=[.!?])\s+", text)
-    useful = " ".join(sentences[:3])
-
-    if useful:
-        return (
-            "இந்தப் பகுதியின் எளிய தமிழ் விளக்கம்:\n\n"
-            f"இந்தப் பாடப்பகுதி முக்கியமாக **{useful[:500]}** "
-            "என்ற கருத்தை விளக்குகிறது. முக்கியமான சொற்கள் மற்றும் கருத்துகளை "
-            "தனித்தனியாகப் படித்து, அவற்றை உங்கள் சொந்த வார்த்தைகளில் "
-            "சொல்லிப் பார்ப்பது நினைவில் வைத்துக்கொள்ள உதவும்."
-        )
-
-    return "பாடக்குறிப்பை உள்ளிடுங்கள். அதைப் பார்த்து எளிய தமிழ் விளக்கத்தை உருவாக்கலாம்."
-
-
-def extract_key_points(text):
-    sentences = re.split(r"(?<=[.!?])\s+", text)
-    sentences = [s.strip() for s in sentences if len(s.strip()) > 10]
-
-    points = []
-    for sentence in sentences:
-        if sentence not in points:
-            points.append(sentence)
-
-    return points[:7]
-
-
-def get_vocabulary(text):
-    words = re.findall(r"\b[A-Za-z]{4,}\b", text.lower())
-    stopwords = {
-        "this", "that", "with", "from", "they", "their", "there",
-        "which", "about", "using", "have", "been", "into", "also",
-        "than", "then", "when", "where", "what", "will", "food",
-        "make", "makes", "process", "used"
-    }
-
-    result = []
-    for word in words:
-        if word not in stopwords and word not in result:
-            result.append(word)
-
-    meanings = {
-        "photosynthesis": "ஒளிச்சேர்க்கை",
-        "chlorophyll": "பச்சையம்",
-        "sunlight": "சூரிய ஒளி",
-        "glucose": "குளுக்கோஸ்",
-        "oxygen": "ஆக்சிஜன்",
-        "carbon": "கார்பன்",
-        "dioxide": "டைஆக்சைடு",
-        "water": "நீர்",
-        "gravity": "ஈர்ப்பு விசை",
-        "atom": "அணு",
-        "democracy": "ஜனநாயகம்",
-        "government": "அரசாங்கம்",
-        "energy": "ஆற்றல்",
-        "force": "விசை",
-    }
-
-    output = []
-    for word in result[:8]:
-        output.append((word.title(), meanings.get(word, "பாடத்துடன் தொடர்புடைய முக்கிய சொல்")))
-
-    return output
-
-
-def make_flashcards(text):
-    lower = text.lower()
-
-    if "photosynthesis" in lower:
-        return [
-            ("What is photosynthesis?", "It is the process by which green plants make food using sunlight."),
-            ("What absorbs sunlight?", "Chlorophyll absorbs sunlight."),
-            ("What is produced during photosynthesis?", "Glucose is produced and oxygen is released as a by-product."),
-            ("What raw materials are used?", "Carbon dioxide and water are used."),
-        ]
-
-    if "gravity" in lower:
-        return [
-            ("What is gravity?", "Gravity is the force of attraction between objects with mass."),
-            ("Why do objects fall toward Earth?", "Earth's gravity pulls them toward its center."),
-            ("What does gravity depend on?", "It is related to the masses of objects and the distance between them."),
-        ]
-
-    if "atom" in lower:
-        return [
-            ("What is an atom?", "The smallest unit of an element that retains its chemical properties."),
-            ("Name three subatomic particles.", "Protons, neutrons, and electrons."),
-            ("Where are electrons found?", "They occupy regions around the nucleus."),
-        ]
-
-    points = extract_key_points(text)
-    cards = []
-
-    for point in points[:5]:
-        words = point.split()
-        topic = " ".join(words[:6])
-        cards.append(
+        scored.append(
             (
-                f"What is the main idea of: {topic}...?",
-                point
+                score,
+                index,
+                sentence
             )
         )
 
-    return cards
+    scored.sort(
+        key=lambda item: (
+            -item[0],
+            item[1]
+        )
+    )
+
+    selected = []
+    seen = set()
+
+    for _, _, sentence in scored:
+
+        normalized = sentence.lower()
+
+        if normalized not in seen:
+
+            selected.append(sentence)
+            seen.add(normalized)
+
+        if len(selected) >= limit:
+            break
+
+    return selected
 
 
-def make_practice_questions(text):
+# =========================================================
+# KEY TERMS
+# =========================================================
+
+def extract_key_terms(text, limit=12):
+
+    stopwords = {
+        "this",
+        "that",
+        "with",
+        "from",
+        "have",
+        "were",
+        "which",
+        "their",
+        "there",
+        "about",
+        "into",
+        "also",
+        "than",
+        "then",
+        "they",
+        "them",
+        "these",
+        "those",
+        "will",
+        "would",
+        "could",
+        "should",
+        "being",
+        "been",
+        "such",
+        "each",
+        "other",
+        "and",
+        "the",
+        "for",
+        "are",
+        "was",
+        "has",
+        "not",
+        "but",
+
+        "ஒரு",
+        "இந்த",
+        "அது",
+        "என்று",
+        "மற்றும்",
+        "ஆகும்",
+        "உள்ள",
+        "என்பது",
+        "மூலம்",
+        "மேலும்",
+    }
+
+    frequency = {}
+
+    for word in words(text):
+
+        normalized = word.lower()
+
+        if (
+            len(normalized) >= 4
+            and normalized not in stopwords
+        ):
+            frequency[normalized] = (
+                frequency.get(normalized, 0) + 1
+            )
+
+    ranked = sorted(
+        frequency.items(),
+        key=lambda item: (
+            -item[1],
+            item[0]
+        )
+    )
+
+    return [
+        term
+        for term, _ in ranked[:limit]
+    ]
+
+
+# =========================================================
+# FORMULA EXTRACTION
+# =========================================================
+
+def extract_formulas(text, limit=10):
+
+    found = []
+
+    lines = re.split(
+        r"[\n.;]",
+        text or ""
+    )
+
+    for line in lines:
+
+        line = line.strip()
+
+        if not line:
+            continue
+
+        if (
+            "=" in line
+            or "formula" in line.lower()
+            or "equation" in line.lower()
+            or "சூத்திரம்" in line.lower()
+        ):
+
+            if len(line) <= 180:
+                found.append(line)
+
+        if len(found) >= limit:
+            break
+
+    return found
+
+
+# =========================================================
+# SIMPLE TAMIL EXPLANATION
+# =========================================================
+
+def tamil_explanation(text, subject):
+
+    points = extract_key_points(
+        text,
+        limit=6
+    )
+
+    if not points:
+
+        return (
+            "இந்தப் பாடத்திற்கான உரை போதுமானதாக இல்லை. "
+            "மேலும் chapter content-ஐ சேர்க்கவும்."
+        )
+
     lower = text.lower()
 
-    if "photosynthesis" in lower:
-        return [
-            "What is photosynthesis?",
-            "What role does chlorophyll play in photosynthesis?",
-            "Which substances are used by plants during photosynthesis?",
-            "What is produced during photosynthesis?",
-            "Why is photosynthesis important for plants?"
-        ]
+    special_explanations = {
 
-    if "gravity" in lower:
-        return [
-            "What is gravity?",
-            "Why do objects fall toward Earth?",
-            "How does gravity affect everyday life?",
-            "What happens to an object when gravity acts on it?",
-            "Why is gravity important?"
-        ]
+        "photosynthesis":
+            "ஒளிச்சேர்க்கை என்பது தாவரங்கள் சூரிய ஒளியின் உதவியுடன் "
+            "கார்பன் டைஆக்சைடு மற்றும் நீரைப் பயன்படுத்தி உணவை உருவாக்கும் "
+            "செயல்முறை. இந்த செயல்முறையில் ஆக்சிஜன் வெளியிடப்படுகிறது.",
 
-    if "atom" in lower:
-        return [
-            "What is an atom?",
-            "What are the main subatomic particles?",
-            "What is the role of the nucleus?",
-            "Where are electrons found?",
-            "Why are atoms important in chemistry?"
-        ]
+        "gravity":
+            "ஈர்ப்பு விசை என்பது பொருட்களை ஒன்றை ஒன்று நோக்கி இழுக்கும் விசை. "
+            "பூமியின் ஈர்ப்பு விசை காரணமாக பொருட்கள் கீழ்நோக்கி விழுகின்றன.",
 
-    if "democracy" in lower:
-        return [
-            "What is democracy?",
-            "Why is voting important in a democracy?",
-            "What is the role of citizens?",
-            "What is representative government?",
-            "Why are rights important in a democracy?"
-        ]
+        "atom":
+            "அணு என்பது ஒரு தனிமத்தின் பண்புகளைத் தக்கவைக்கும் மிகச் சிறிய அலகு. "
+            "அணுவில் புரோட்டான், நியூட்ரான் மற்றும் எலக்ட்ரான் போன்ற துகள்கள் உள்ளன.",
 
-    points = extract_key_points(text)
+        "democracy":
+            "ஜனநாயகம் என்பது மக்கள் தங்களின் பிரதிநிதிகளைத் தேர்ந்தெடுத்து "
+            "ஆட்சியில் பங்கேற்கும் அரசியல் முறை.",
+    }
+
+    for keyword, explanation in special_explanations.items():
+
+        if keyword in lower:
+            return explanation
+
+    bullets = "\n".join(
+        f"• {point}"
+        for point in points[:5]
+    )
+
+    return (
+        "**எளிய விளக்கம்**\n\n"
+        f"{bullets}\n\n"
+        "👉 ஒவ்வொரு கருத்தையும் உங்கள் சொந்த வார்த்தைகளில் "
+        "சொல்லிப் பாருங்கள். பின்னர் mark-wise questions-ஐ practice செய்யுங்கள்."
+    )
+
+
+# =========================================================
+# ENGLISH SUMMARY
+# =========================================================
+
+def english_summary(text):
+
+    points = extract_key_points(
+        text,
+        limit=5
+    )
+
+    if not points:
+        return "Add more chapter content."
+
+    return "\n".join(
+        f"• {point}"
+        for point in points
+    )
+
+
+# =========================================================
+# MARK-WISE QUESTIONS
+# =========================================================
+
+def make_mark_questions(text, mark, count=5):
+
+    points = extract_key_points(
+        text,
+        limit=12
+    )
+
+    terms = extract_key_terms(
+        text,
+        limit=12
+    )
 
     questions = []
-    for point in points[:5]:
-        questions.append(f"Explain this idea in your own words: {point}")
 
-    if not questions:
-        questions = [
-            "What is the main idea of this lesson?",
-            "List two important facts from the lesson.",
-            "Which term in the lesson is most important?",
-            "Explain one concept from the lesson in your own words.",
-            "What would you revise before an exam?"
-        ]
+    for point in points:
 
-    return questions
+        if mark == 1:
 
-
-def build_quiz_questions(text, count):
-    lower = text.lower()
-
-    if "photosynthesis" in lower:
-        bank = [
-            {
-                "q": "What is photosynthesis?",
-                "options": [
-                    "The process by which green plants make food",
-                    "The movement of animals",
-                    "The breakdown of rocks",
-                    "The formation of clouds",
-                ],
-                "answer": "The process by which green plants make food",
-                "explanation": "Green plants use sunlight, carbon dioxide, and water to make food."
-            },
-            {
-                "q": "What absorbs sunlight during photosynthesis?",
-                "options": ["Chlorophyll", "Glucose", "Oxygen", "Water"],
-                "answer": "Chlorophyll",
-                "explanation": "Chlorophyll is the green pigment that absorbs sunlight."
-            },
-            {
-                "q": "Which gas is released as a by-product?",
-                "options": ["Oxygen", "Nitrogen", "Hydrogen", "Helium"],
-                "answer": "Oxygen",
-                "explanation": "Oxygen is released as a by-product of photosynthesis."
-            },
-            {
-                "q": "Which substance is produced as food?",
-                "options": ["Glucose", "Nitrogen", "Salt", "Oxygen"],
-                "answer": "Glucose",
-                "explanation": "Plants produce glucose during photosynthesis."
-            },
-            {
-                "q": "Which combination is needed for photosynthesis?",
-                "options": [
-                    "Sunlight, carbon dioxide, and water",
-                    "Oxygen, salt, and soil",
-                    "Nitrogen, oxygen, and glucose",
-                    "Only sunlight",
-                ],
-                "answer": "Sunlight, carbon dioxide, and water",
-                "explanation": "These are the main inputs described in the lesson."
-            },
-            {
-                "q": "Why is chlorophyll important?",
-                "options": [
-                    "It helps absorb sunlight",
-                    "It produces soil",
-                    "It creates gravity",
-                    "It stores oxygen in clouds",
-                ],
-                "answer": "It helps absorb sunlight",
-                "explanation": "Chlorophyll captures sunlight needed for the process."
-            },
-            {
-                "q": "Photosynthesis mainly helps plants to:",
-                "options": [
-                    "Make their own food",
-                    "Move from one place to another",
-                    "Produce rocks",
-                    "Absorb sound",
-                ],
-                "answer": "Make their own food",
-                "explanation": "Photosynthesis allows green plants to make food."
-            },
-        ]
-    elif "gravity" in lower:
-        bank = [
-            {
-                "q": "What is gravity?",
-                "options": [
-                    "A force of attraction between masses",
-                    "A type of light",
-                    "A chemical reaction",
-                    "A form of sound",
-                ],
-                "answer": "A force of attraction between masses",
-                "explanation": "Gravity attracts objects that have mass."
-            },
-            {
-                "q": "Why does an object fall toward Earth?",
-                "options": [
-                    "Earth's gravity pulls it",
-                    "The object creates wind",
-                    "Sunlight pushes it",
-                    "Sound attracts it",
-                ],
-                "answer": "Earth's gravity pulls it",
-                "explanation": "Earth's gravitational attraction pulls objects toward its center."
-            },
-            {
-                "q": "Gravity acts on objects that have:",
-                "options": ["Mass", "Only color", "Only sound", "Only temperature"],
-                "answer": "Mass",
-                "explanation": "Gravity is associated with objects that have mass."
-            },
-        ]
-    elif "atom" in lower:
-        bank = [
-            {
-                "q": "What is an atom?",
-                "options": [
-                    "A basic unit of an element",
-                    "A type of planet",
-                    "A kind of plant",
-                    "A unit of temperature",
-                ],
-                "answer": "A basic unit of an element",
-                "explanation": "Atoms are the basic units that make up elements."
-            },
-            {
-                "q": "Which particle has a negative charge?",
-                "options": ["Electron", "Proton", "Neutron", "Nucleus"],
-                "answer": "Electron",
-                "explanation": "Electrons have a negative electric charge."
-            },
-            {
-                "q": "Which particles are found in the nucleus?",
-                "options": [
-                    "Protons and neutrons",
-                    "Only electrons",
-                    "Only photons",
-                    "Only molecules",
-                ],
-                "answer": "Protons and neutrons",
-                "explanation": "The nucleus contains protons and neutrons."
-            },
-        ]
-    else:
-        points = extract_key_points(text)
-        bank = []
-
-        for i, point in enumerate(points[:7]):
-            short = point[:90]
-            bank.append(
-                {
-                    "q": f"Which statement best matches this lesson point: {short}?",
-                    "options": [
-                        point,
-                        "This statement is unrelated to the lesson.",
-                        "This is a completely different topic.",
-                        "None of the lesson ideas apply.",
-                    ],
-                    "answer": point,
-                    "explanation": "This option matches the information in the provided study text."
-                }
+            question = (
+                "Define or identify the main idea in this statement: "
+                f"{point}"
             )
 
-    random.shuffle(bank)
-    return bank[:min(count, len(bank))]
+        elif mark == 2:
 
+            question = (
+                f"Write two important points about: {point}"
+            )
 
-def reset_quiz():
-    st.session_state.quiz_questions = []
-    st.session_state.quiz_answers = {}
-    st.session_state.quiz_submitted = False
-    st.session_state.quiz_version += 1
+        elif mark == 3:
 
+            question = (
+                f"Explain the idea clearly and give relevant details: "
+                f"{point}"
+            )
 
-def start_quiz(text, count):
-    questions = build_quiz_questions(text, count)
-    st.session_state.quiz_questions = questions
-    st.session_state.quiz_answers = {}
-    st.session_state.quiz_submitted = False
-    st.session_state.quiz_version += 1
+        else:
 
+            question = (
+                "Explain the following topic in a structured answer "
+                "with definition, key points and relevant details: "
+                f"{point}"
+            )
 
-def load_flashcards(text):
-    st.session_state.flashcards = make_flashcards(text)
-    st.session_state.flashcard_index = 0
-    st.session_state.flashcard_revealed = False
+        questions.append(question)
 
+        if len(questions) >= count:
+            break
 
+    for term in terms:
 
-# =========================================================
-# V5 helpers
-# =========================================================
+        if mark == 1:
+            question = f"What is {term}?"
 
-SUBJECTS = [
-    "General",
-    "Tamil",
-    "English",
-    "Mathematics",
-    "Science",
-    "Social Science",
-]
+        elif mark == 2:
+            question = f"Write two points about {term}."
 
-SUBJECT_ICONS = {
-    "General": "📚",
-    "Tamil": "🪷",
-    "English": "🔤",
-    "Mathematics": "➗",
-    "Science": "🔬",
-    "Social Science": "🌍",
-}
+        elif mark == 3:
+            question = f"Explain {term} briefly."
 
+        else:
+            question = f"Write a detailed answer about {term}."
 
-def subject_dashboard_stats():
-    materials = st.session_state.subject_materials
-    return [
-        {
-            "subject": subject,
-            "words": len(materials.get(subject, "").split()),
-            "has_notes": bool(materials.get(subject, "")),
-        }
-        for subject in SUBJECTS
-    ]
+        if question not in questions:
+            questions.append(question)
 
+        if len(questions) >= count:
+            break
 
-def save_to_subject(subject, text):
-    if text:
-        st.session_state.subject_materials[subject] = text
-        st.session_state.selected_subject = subject
+    fallbacks = {
 
+        1: [
+            "What is the main definition from this chapter?",
+            "Name one important term from the chapter.",
+        ],
 
-def get_current_subject_text():
-    return st.session_state.subject_materials.get(
-        st.session_state.selected_subject, ""
-    )
+        2: [
+            "Write any two important points from the chapter.",
+            "State two key facts you learned.",
+        ],
 
+        3: [
+            "Explain one major concept from the chapter.",
+            "Describe an important process from the chapter.",
+        ],
 
-def make_revision_pack(text):
-    return {
-        "summary": tamil_explanation(text),
-        "points": extract_key_points(text)[:5],
-        "practice": make_practice_questions(text)[:5],
-        "cards": make_flashcards(text)[:5],
-        "checklist": [
-            "Read the key points once without looking at the full lesson.",
-            "Explain the main idea in your own words.",
-            "Review the important vocabulary.",
-            "Try the practice questions without checking your notes.",
-            "Finish with a short Test Yourself quiz.",
+        5: [
+            "Write a detailed answer covering the main concepts in this chapter.",
+            "Explain the most important topic from this chapter with suitable points.",
         ],
     }
 
+    for question in fallbacks[mark]:
 
-def record_quiz_result(score, total, subject):
-    percentage = int((score / total) * 100) if total else 0
-    st.session_state.quiz_history.append({
-        "subject": subject,
-        "score": score,
-        "total": total,
-        "percentage": percentage,
-    })
-    # Keep the most recent 20 attempts so the session stays lightweight.
-    st.session_state.quiz_history = st.session_state.quiz_history[-20:]
+        if len(questions) >= count:
+            break
 
+        if question not in questions:
+            questions.append(question)
 
-def progress_stats():
-    history = st.session_state.quiz_history
-    if not history:
-        return {"attempts": 0, "average": 0, "best": 0, "questions": 0}
-
-    percentages = [item["percentage"] for item in history]
-    return {
-        "attempts": len(history),
-        "average": int(sum(percentages) / len(percentages)),
-        "best": max(percentages),
-        "questions": sum(item["total"] for item in history),
-    }
-
-
-def subject_progress(subject):
-    attempts = [
-        item for item in st.session_state.quiz_history
-        if item["subject"] == subject
-    ]
-    if not attempts:
-        return {"attempts": 0, "average": 0, "best": 0}
-
-    percentages = [item["percentage"] for item in attempts]
-    return {
-        "attempts": len(attempts),
-        "average": int(sum(percentages) / len(percentages)),
-        "best": max(percentages),
-    }
-
-
-def add_difficult_topic(topic):
-    topic = topic.strip()
-    if topic and topic not in st.session_state.difficult_topics:
-        st.session_state.difficult_topics.append(topic)
-
-
-def remove_difficult_topic(topic):
-    if topic in st.session_state.difficult_topics:
-        st.session_state.difficult_topics.remove(topic)
+    return questions[:count]
 
 
 # =========================================================
-# Monetization
+# MODEL ANSWER GUIDANCE
 # =========================================================
 
-PLAN_LIMITS = {
-    "study_notes": 5,
-    "practice": 5,
-    "flashcards": 5,
-    "quizzes": 3,
-    "revision": 2,
-}
+def model_answer_for_question(
+    question,
+    text,
+    mark
+):
 
-PLAN_LABELS = {
-    "study_notes": "Study Notes / analyses",
-    "practice": "Practice sets",
-    "flashcards": "Flashcard sets",
-    "quizzes": "Quizzes",
-    "revision": "Exam Revision packs",
-}
+    if mark == 1:
 
-def is_premium():
-    return st.session_state.plan == "Premium"
-
-def can_use(feature):
-    if is_premium():
-        return True
-    return st.session_state.usage.get(feature, 0) < PLAN_LIMITS[feature]
-
-def use_feature(feature):
-    if not is_premium():
-        st.session_state.usage[feature] = st.session_state.usage.get(feature, 0) + 1
-
-def remaining(feature):
-    if is_premium():
-        return "Unlimited"
-    return max(0, PLAN_LIMITS[feature] - st.session_state.usage.get(feature, 0))
-
-def show_upgrade(feature):
-    used = st.session_state.usage.get(feature, 0)
-    limit = PLAN_LIMITS[feature]
-    st.warning(
-        f"⭐ You have reached the Free limit for {PLAN_LABELS[feature]} ({used}/{limit})."
-    )
-    st.markdown(
-        "### ⭐ Upgrade to Premium — ₹49/month\n"
-        "Get unlimited study tools, unlimited quizzes, unlimited revision packs, "
-        "and unlimited saved study material."
-    )
-    st.button("🚀 Upgrade to Premium", key=f"upgrade_{feature}", use_container_width=True)
-    st.caption("Payment is not connected yet — this button is a preview of the upgrade flow.")
-
-def pricing_ui():
-    st.markdown("### 💎 Choose your plan")
-    free, premium = st.columns(2)
-    with free:
-        st.markdown("#### 🆓 Free")
-        st.markdown("# ₹0")
-        st.caption("Try Tamil Study AI before paying.")
-        for feature, limit in PLAN_LIMITS.items():
-            st.markdown(f"✓ {limit} {PLAN_LABELS[feature]} / month")
-        st.markdown("✓ All subjects")
-        st.markdown("✓ Progress tracking")
-    with premium:
-        st.markdown("#### ⭐ Premium")
-        st.markdown("# ₹49 / month")
-        st.caption("Unlimited study and revision.")
-        st.markdown("✓ Unlimited Study Notes")
-        st.markdown("✓ Unlimited Practice Questions")
-        st.markdown("✓ Unlimited Flashcards")
-        st.markdown("✓ Unlimited Quizzes")
-        st.markdown("✓ Unlimited Exam Revision")
-        st.markdown("✓ Unlimited saved study material")
-        st.markdown("✓ Full progress tracking")
-        st.button("🚀 Upgrade to Premium", key="upgrade_pricing", type="primary", use_container_width=True)
-        st.caption("Payment coming in the next release.")
-
-
-
-# =========================================================
-# Sidebar
-# =========================================================
-
-with st.sidebar:
-    st.markdown("## 📚 Tamil Study AI")
-    st.caption("Simple study tools • Tamil-friendly learning")
-    st.markdown('<div class="brand-pill">V5.1 • No API required</div>', unsafe_allow_html=True)
-
-    st.divider()
-
-    mode = st.radio(
-        "Choose a study mode",
-        [
-            "🏠 Home",
-            "📈 My Progress",
-            "💎 Premium",
-            "📊 My Subjects",
-            "📄 Study Notes",
-            "📝 Exam Revision",
-            "🃏 Flashcards",
-            "✍️ Practice",
-            "🎯 Test Yourself",
-        ],
-        index=0,
-    )
-
-    st.divider()
-    if is_premium():
-        st.success("⭐ Premium plan")
-    else:
-        st.markdown("**🆓 Free plan**")
-        st.caption(f"Notes {remaining("study_notes")} • Quizzes {remaining("quizzes")} left")
-
-    st.divider()
-    st.markdown("### 📚 Current subject")
-
-    selected_subject = st.selectbox(
-        "Subject",
-        SUBJECTS,
-        index=SUBJECTS.index(st.session_state.selected_subject),
-        label_visibility="collapsed",
-    )
-    st.session_state.selected_subject = selected_subject
-
-    st.divider()
-
-    if st.session_state.study_text:
-        st.success("Study material loaded")
-        st.caption(f"{len(st.session_state.study_text.split())} words")
-
-    sidebar_stats = progress_stats()
-    st.markdown("### 📈 Progress")
-    st.caption(
-        f"Quizzes: {sidebar_stats['attempts']} • "
-        f"Best: {sidebar_stats['best']}%"
-    )
-
-    st.markdown("### Quick guide")
-    st.caption("1. Add your notes")
-    st.caption("2. Analyze them")
-    st.caption("3. Revise with tools")
-    st.caption("4. Test yourself")
-
-
-# =========================================================
-# HOME
-# =========================================================
-
-if mode == "🏠 Home":
-    st.markdown(
-        """
-        <div class="hero">
-            <div class="hero-badge">🇮🇳 YOUR SIMPLE STUDY WORKSPACE</div>
-            <h1>📚 Tamil Study AI</h1>
-            <p>Understand lessons in simple Tamil, revise important ideas, and test yourself — all in one place.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("### Everything you need for a quick revision session")
-
-    c1, c2, c3 = st.columns(3)
-
-    with c1:
-        st.markdown(
-            """
-            <div class="feature-card">
-                <h3>📄 Study Notes</h3>
-                <p>Paste a lesson or upload a PDF and turn it into clear revision material with Tamil support.</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
+        return (
+            "Answer format: give one precise definition, "
+            "name or fact. Keep it short and direct."
         )
 
-    with c2:
-        st.markdown(
-            """
-            <div class="feature-card">
-                <h3>🃏 Flashcards</h3>
-                <p>Review important concepts one card at a time and reveal the answer when you are ready.</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
+    if mark == 2:
+
+        return (
+            "Answer format:\n"
+            "1. State the main point.\n"
+            "2. Add one supporting point.\n\n"
+            "Use chapter terminology where possible."
         )
 
-    with c3:
-        st.markdown(
-            """
-            <div class="feature-card">
-                <h3>🎯 Test Yourself</h3>
-                <p>Take a quick multiple-choice quiz, see your score, and review your mistakes.</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
+    if mark == 3:
+
+        return (
+            "Answer format:\n"
+            "• Definition/main idea\n"
+            "• 2–3 important details\n"
+            "• Example or result if supported by the chapter."
         )
 
-    st.markdown("### Why use Tamil Study AI?")
-
-    q1, q2, q3 = st.columns(3)
-    with q1:
-        st.markdown("**🇮🇳 Tamil-friendly**")
-        st.caption("Understand difficult study ideas with simple Tamil explanations.")
-    with q2:
-        st.markdown("**🔑 Revision focused**")
-        st.caption("Key points, vocabulary, flashcards and practice in one workflow.")
-    with q3:
-        st.markdown("**⚡ Simple & fast**")
-        st.caption("No API key or complicated setup is required.")
-
-    st.markdown("---")
-    pricing_ui()
-
-    st.markdown("### How it works")
-
-    s1, s2, s3, s4 = st.columns(4)
-
-    steps = [
-        ("1", "Add notes", "Paste text or upload a PDF."),
-        ("2", "Analyze", "Get Tamil explanations and key points."),
-        ("3", "Revise", "Use vocabulary, flashcards and practice."),
-        ("4", "Test", "Take a quiz and review your answers."),
-    ]
-
-    for col, (num, title, desc) in zip([s1, s2, s3, s4], steps):
-        with col:
-            st.markdown(
-                f"""
-                <div class="stat-card">
-                    <div class="stat-number">{num}</div>
-                    <b>{title}</b>
-                    <p class="small-muted">{desc}</p>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-    st.markdown("---")
-    st.info("💡 Start with **Study Notes** from the sidebar.")
-
-
-
-# =========================================================
-# MY PROGRESS
-# =========================================================
-
-if mode == "📈 My Progress":
-    st.title("📈 My Progress")
-    st.write("See how your quiz performance is improving across your subjects.")
-
-    stats = progress_stats()
-
-    m1, m2, m3, m4 = st.columns(4)
-    with m1:
-        st.metric("📝 Quizzes", stats["attempts"])
-    with m2:
-        st.metric("📊 Average", f"{stats['average']}%")
-    with m3:
-        st.metric("🏆 Best Score", f"{stats['best']}%")
-    with m4:
-        st.metric("❓ Questions", stats["questions"])
-
-    st.markdown("---")
-    st.subheader("📚 Subject Progress")
-
-    subject_cols = st.columns(3)
-    for i, subject in enumerate(SUBJECTS):
-        progress = subject_progress(subject)
-        with subject_cols[i % 3]:
-            st.markdown(
-                f"### {SUBJECT_ICONS[subject]} {subject}"
-            )
-            if progress["attempts"]:
-                st.progress(
-                    progress["average"] / 100,
-                    text=f"Average: {progress['average']}%"
-                )
-                st.caption(
-                    f"Attempts: {progress['attempts']} • "
-                    f"Best: {progress['best']}%"
-                )
-            else:
-                st.caption("No quiz attempts yet.")
-
-    st.markdown("---")
-    st.subheader("🧠 Difficult Topics")
-    st.caption("Keep topics here that you want to revise again.")
-
-    if st.session_state.difficult_topics:
-        for i, topic in enumerate(st.session_state.difficult_topics):
-            c1, c2 = st.columns([5, 1])
-            with c1:
-                st.info(f"📌 {topic}")
-            with c2:
-                if st.button("Remove", key=f"remove_topic_{i}", use_container_width=True):
-                    remove_difficult_topic(topic)
-                    st.rerun()
-    else:
-        st.caption("No difficult topics saved yet.")
-
-    topic_input = st.text_input(
-        "Add a difficult topic",
-        placeholder="Example: Algebraic equations",
-        key="progress_topic_input",
+    return (
+        "Answer format:\n"
+        "• Introduction/definition\n"
+        "• Main explanation\n"
+        "• Supporting points\n"
+        "• Example/process/result when supported\n"
+        "• Short conclusion"
     )
-    if st.button("➕ Save Difficult Topic", use_container_width=True):
-        if topic_input.strip():
-            add_difficult_topic(topic_input)
-            st.rerun()
-        else:
-            st.warning("Enter a topic first.")
-
-    st.markdown("---")
-    st.subheader("🕘 Quiz History")
-
-    if not st.session_state.quiz_history:
-        st.info("Complete a Test Yourself quiz and your result will appear here.")
-    else:
-        for number, attempt in enumerate(reversed(st.session_state.quiz_history), 1):
-            pct = attempt["percentage"]
-            if pct >= 80:
-                icon = "🟢"
-            elif pct >= 50:
-                icon = "🟡"
-            else:
-                icon = "🔴"
-
-            h1, h2, h3 = st.columns([3, 2, 1])
-            with h1:
-                st.markdown(
-                    f"{icon} **Attempt {number} — "
-                    f"{SUBJECT_ICONS.get(attempt['subject'], '📚')} {attempt['subject']}**"
-                )
-            with h2:
-                st.caption(f"Score: {attempt['score']}/{attempt['total']}")
-            with h3:
-                st.metric("Score", f"{pct}%")
-
-
-# =========================================================
-# PREMIUM
-# =========================================================
-
-if mode == "💎 Premium":
-    st.title("💎 Tamil Study AI Premium")
-    st.write("Study without running into the Free plan limits.")
-    pricing_ui()
-
-    st.markdown("---")
-    st.subheader("📊 Your Free usage")
-    for feature, limit in PLAN_LIMITS.items():
-        used = st.session_state.usage.get(feature, 0)
-        st.progress(min(used / limit, 1.0), text=f"{PLAN_LABELS[feature]}: {used}/{limit}")
-
-# =========================================================
-# MY SUBJECTS
-# =========================================================
-
-if mode == "📊 My Subjects":
-    st.title("📊 My Subjects")
-    st.write("Organize your study material by subject and quickly return to revision.")
-
-    stats = subject_dashboard_stats()
-    cols = st.columns(3)
-
-    for i, item in enumerate(stats):
-        with cols[i % 3]:
-            subject = item["subject"]
-            icon = SUBJECT_ICONS[subject]
-            status = "Notes saved" if item["has_notes"] else "No notes yet"
-            st.markdown(
-                f"""
-                <div class="feature-card">
-                    <h3>{icon} {subject}</h3>
-                    <p><b>{item["words"]}</b> words</p>
-                    <p class="small-muted">{status}</p>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-    st.markdown("---")
-    st.subheader("📌 Current subject")
-
-    subject = st.selectbox(
-        "Choose a subject to view",
-        SUBJECTS,
-        index=SUBJECTS.index(st.session_state.selected_subject),
-    )
-    st.session_state.selected_subject = subject
-
-    subject_text = st.session_state.subject_materials.get(subject, "")
-
-    if subject_text:
-        st.success(f"{SUBJECT_ICONS[subject]} {subject} notes are ready.")
-
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.metric("Words", len(subject_text.split()))
-        with c2:
-            st.metric("Key points", len(extract_key_points(subject_text)))
-        with c3:
-            st.metric("Practice questions", len(make_practice_questions(subject_text)))
-
-        with st.expander("👀 Preview saved notes"):
-            st.write(
-                subject_text[:1200]
-                + ("..." if len(subject_text) > 1200 else "")
-            )
-
-        if st.button(
-            "📝 Open Exam Revision",
-            type="primary",
-            use_container_width=True,
-        ):
-            st.session_state.study_text = subject_text
-            st.session_state.revision_topic = subject
-            st.rerun()
-    else:
-        st.info(
-            f"No notes saved for {subject} yet. "
-            "Go to Study Notes, choose this subject, and analyze some material."
-        )
-
-    st.markdown("### 💡 Suggested workflow")
-    st.caption(
-        "Choose a subject → add notes → save them → use Exam Revision → finish with a quiz."
-    )
-
-
-# =========================================================
-# EXAM REVISION
-# =========================================================
-
-elif mode == "📝 Exam Revision":
-    st.title("📝 Exam Revision")
-    st.write("A focused revision session built from your saved study material.")
-
-    revision_text = get_current_subject_text() or st.session_state.study_text
-
-    if not revision_text:
-        st.info("Add and analyze study material first from Study Notes.")
-    else:
-        if not can_use("revision"):
-            show_upgrade("revision")
-            st.stop()
-        use_feature("revision")
-        st.caption(f"Free revision packs remaining: {remaining('revision')}")
-        topic_name = st.session_state.selected_subject
-
-        st.markdown(
-            f"### 🎯 Revision pack: {SUBJECT_ICONS.get(topic_name, '📚')} {topic_name}"
-        )
-
-        pack = make_revision_pack(revision_text)
-
-        st.markdown("#### 🇮🇳 Quick Tamil explanation")
-        st.info(pack["summary"])
-
-        st.markdown("#### 🔑 Must-remember points")
-        for point in pack["points"]:
-            st.markdown(f"- {point}")
-
-        st.markdown("#### 📖 Quick vocabulary")
-        vocab = get_vocabulary(revision_text)
-
-        if vocab:
-            vc1, vc2 = st.columns(2)
-            for i, (word, meaning) in enumerate(vocab):
-                with (vc1 if i % 2 == 0 else vc2):
-                    st.markdown(f"**{word}** — {meaning}")
-        else:
-            st.caption("No special vocabulary was detected.")
-
-        st.markdown("#### 🃏 Flashcard review")
-        for question, answer in pack["cards"]:
-            with st.expander(question):
-                st.write(answer)
-
-        st.markdown("#### ✍️ Practice before the exam")
-        for i, question in enumerate(pack["practice"], 1):
-            st.markdown(f"**{i}. {question}**")
-
-        st.markdown("#### ☑️ Final revision checklist")
-        for i, item in enumerate(pack["checklist"]):
-            st.checkbox(
-                item,
-                key=f"revision_{st.session_state.quiz_version}_{i}",
-            )
-
-        st.markdown("---")
-        st.markdown("### 🎯 Ready for the final check?")
-        st.caption(
-            "Use Test Yourself from the sidebar to take a quiz on this material."
-        )
-
-
-# =========================================================
-# STUDY NOTES
-# =========================================================
-
-elif mode == "📄 Study Notes":
-    st.title("📄 Study Notes")
-    st.write("Turn your lesson into a simple revision dashboard.")
-
-    selected_subject = st.selectbox(
-        "Save these notes under",
-        SUBJECTS,
-        index=SUBJECTS.index(st.session_state.selected_subject),
-        key="study_notes_subject",
-    )
-    st.session_state.selected_subject = selected_subject
-
-    input_method = st.radio(
-        "How do you want to add your study material?",
-        ["Paste Text", "Upload PDF"],
-        horizontal=True,
-    )
-
-    text = ""
-
-    if input_method == "Paste Text":
-        text = st.text_area(
-            "Paste your lesson here",
-            height=220,
-            placeholder="Example: Photosynthesis is the process by which green plants make their food...",
-        )
-    else:
-        uploaded_file = st.file_uploader("Upload a PDF", type=["pdf"])
-        if uploaded_file:
-            text = extract_pdf_text(uploaded_file)
-            if text:
-                st.success("PDF text extracted successfully.")
-
-    if st.button("✨ Analyze My Notes", type="primary", use_container_width=True):
-        text = clean_text(text)
-
-        if not text:
-            st.warning("Please add some study material first.")
-        elif not can_use("study_notes"):
-            show_upgrade("study_notes")
-        else:
-            use_feature("study_notes")
-            st.session_state.study_text = text
-            st.session_state.analysis_done = True
-            save_to_subject(selected_subject, text)
-            load_flashcards(text)
-            reset_quiz()
-            st.success(
-                f"Your study material is ready and saved under "
-                f"{SUBJECT_ICONS[selected_subject]} {selected_subject}!"
-            )
-            st.caption(f"Free analyses remaining: {remaining('study_notes')}")
-
-    if st.session_state.study_text:
-        study_text = st.session_state.study_text
-        subject = detect_subject(study_text)
-        points = extract_key_points(study_text)
-        vocab = get_vocabulary(study_text)
-
-        st.markdown("---")
-        st.subheader("📊 Study Overview")
-
-        a, b, c = st.columns(3)
-
-        with a:
-            st.markdown(
-                f"""
-                <div class="stat-card">
-                    <div class="stat-number">{subject}</div>
-                    <span class="small-muted">Detected subject</span>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-        with b:
-            st.markdown(
-                f"""
-                <div class="stat-card">
-                    <div class="stat-number">{len(study_text.split())}</div>
-                    <span class="small-muted">Words</span>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-        with c:
-            st.markdown(
-                f"""
-                <div class="stat-card">
-                    <div class="stat-number">{len(points)}</div>
-                    <span class="small-muted">Key points</span>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-        st.markdown("### 🇮🇳 தமிழ் விளக்கம்")
-        st.info(tamil_explanation(study_text))
-
-        st.markdown("### 🔑 Key Points")
-        if points:
-            for point in points:
-                st.markdown(f"- {point}")
-        else:
-            st.write("No clear key points found.")
-
-        st.markdown("### 📖 Important Vocabulary")
-
-        if vocab:
-            vcols = st.columns(2)
-            for i, (word, meaning) in enumerate(vocab):
-                with vcols[i % 2]:
-                    st.markdown(f"**{word}** — {meaning}")
-        else:
-            st.write("No vocabulary items found.")
-
-        st.markdown("### 🃏 Quick Flashcards")
-        cards = make_flashcards(study_text)
-
-        for question, answer in cards[:4]:
-            with st.expander(question):
-                st.write(answer)
-
-        st.markdown("### ✍️ Practice Questions")
-
-        for i, question in enumerate(make_practice_questions(study_text), 1):
-            st.markdown(f"**{i}. {question}**")
-            st.text_input(
-                "Your answer",
-                key=f"practice_{st.session_state.quiz_version}_{i}",
-                label_visibility="collapsed",
-                placeholder="Type your answer here...",
-            )
 
 
 # =========================================================
 # FLASHCARDS
 # =========================================================
 
-elif mode == "🃏 Flashcards":
-    st.title("🃏 Flashcards")
+def make_flashcards(
+    text,
+    count=10
+):
+
+    cards = []
+
+    points = extract_key_points(
+        text,
+        count
+    )
+
+    for point in points:
+
+        cards.append(
+            {
+                "front": "What is the key idea here?",
+                "back": point,
+            }
+        )
+
+    return cards
+
+
+# =========================================================
+# REVISION PLAN
+# =========================================================
+
+def make_revision_plan(
+    exam_goal
+):
+
+    if exam_goal == "Exam Tomorrow":
+
+        return [
+            "30 min — Understand the chapter.",
+            "25 min — Learn key points and terms.",
+            "30 min — Practice 1/2-mark questions.",
+            "35 min — Practice 3/5-mark questions.",
+            "20 min — Take the mock test.",
+            "10 min — Review mistakes.",
+        ]
+
+    return [
+        "Understand the chapter.",
+        "Review key points and terms.",
+        "Practice questions by marks.",
+        "Use flashcards for active recall.",
+        "Take the mock test.",
+        "Review mistakes.",
+    ]
+
+
+# =========================================================
+# BUILD EXAM PACK
+# =========================================================
+
+def build_exam_pack(
+    text,
+    profile,
+    title
+):
+
+    return {
+
+        "chapter_title": title,
+
+        "profile": profile.copy(),
+
+        "tamil_explanation":
+            tamil_explanation(
+                text,
+                profile["subject"]
+            ),
+
+        "english_summary":
+            english_summary(text),
+
+        "key_points":
+            extract_key_points(
+                text,
+                10
+            ),
+
+        "key_terms":
+            extract_key_terms(
+                text,
+                12
+            ),
+
+        "formulas":
+            extract_formulas(
+                text,
+                10
+            ),
+
+        "questions": {
+
+            1: make_mark_questions(
+                text,
+                1,
+                6
+            ),
+
+            2: make_mark_questions(
+                text,
+                2,
+                5
+            ),
+
+            3: make_mark_questions(
+                text,
+                3,
+                5
+            ),
+
+            5: make_mark_questions(
+                text,
+                5,
+                5
+            ),
+        },
+
+        "flashcards":
+            make_flashcards(text),
+
+        "revision_plan":
+            make_revision_plan(
+                profile["exam"]
+            ),
+
+        "quick_revision":
+            extract_key_points(
+                text,
+                7
+            ),
+
+        "created_at":
+            datetime.now().strftime(
+                "%d %b %Y, %I:%M %p"
+            ),
+    }
+
+
+# =========================================================
+# MOCK TEST
+# =========================================================
+
+def build_quiz_questions(
+    text,
+    count=8
+):
+
+    points = extract_key_points(
+        text,
+        12
+    )
+
+    questions = []
+
+    for index, point in enumerate(
+        points[:count]
+    ):
+
+        if len(point) > 115:
+
+            correct = (
+                point[:115]
+                .rsplit(" ", 1)[0]
+                + "..."
+            )
+
+        else:
+
+            correct = point
+
+        distractors = []
+
+        for other in points:
+
+            if other == point:
+                continue
+
+            if len(other) > 115:
+
+                distractor = (
+                    other[:115]
+                    .rsplit(" ", 1)[0]
+                    + "..."
+                )
+
+            else:
+
+                distractor = other
+
+            if distractor not in distractors:
+                distractors.append(
+                    distractor
+                )
+
+            if len(distractors) >= 3:
+                break
+
+        while len(distractors) < 3:
+
+            distractors.append(
+                "Not stated in the supplied chapter."
+            )
+
+        options = [
+            correct
+        ] + distractors[:3]
+
+        random.Random(
+            index + 42
+        ).shuffle(options)
+
+        questions.append(
+            {
+                "question":
+                    "Which option best represents an important point from the chapter?",
+
+                "options":
+                    options,
+
+                "answer":
+                    correct,
+            }
+        )
+
+    return questions
+
+
+# =========================================================
+# ACTIONS
+# =========================================================
+
+def load_material(
+    text,
+    source="",
+    title=""
+):
+
+    text = clean_text(text)
+
+    st.session_state.study_text = text
+
+    st.session_state.source_name = source
+
+    st.session_state.chapter_title = (
+        title.strip()
+        if title.strip()
+        else safe_title(text)
+    )
+
+    st.session_state.exam_pack = None
+
+    st.session_state.flashcards = []
+
+    st.session_state.quiz_questions = []
+
+    st.session_state.quiz_answers = {}
+
+    st.session_state.quiz_submitted = False
+
+    st.session_state.quiz_result_recorded = False
+
+
+def create_exam_pack():
 
     if not st.session_state.study_text:
-        st.info("Add and analyze study material first from **Study Notes**.")
-    else:
-        if not st.session_state.flashcards:
-            if not can_use("flashcards"):
-                show_upgrade("flashcards")
-                st.stop()
-            use_feature("flashcards")
-            load_flashcards(st.session_state.study_text)
-            st.caption(f"Free flashcard sets remaining: {remaining('flashcards')}")
+        return False
 
-        cards = st.session_state.flashcards
+    st.session_state.exam_pack = build_exam_pack(
+        st.session_state.study_text,
+        st.session_state.profile,
+        st.session_state.chapter_title
+    )
 
-        if not cards:
-            st.warning("No flashcards could be created from this material.")
+    st.session_state.flashcards = (
+        st.session_state.exam_pack["flashcards"]
+    )
+
+    st.session_state.flashcard_index = 0
+
+    st.session_state.flashcard_revealed = False
+
+    st.session_state.quiz_questions = (
+        build_quiz_questions(
+            st.session_state.study_text
+        )
+    )
+
+    st.session_state.quiz_answers = {}
+
+    st.session_state.quiz_submitted = False
+
+    st.session_state.quiz_result_recorded = False
+
+    st.session_state.study_sessions += 1
+
+    st.session_state.completed_packs += 1
+
+    return True
+
+
+def save_bookmark(
+    label,
+    content
+):
+
+    item = {
+
+        "label": label,
+
+        "content": content,
+
+        "subject":
+            st.session_state.profile["subject"],
+
+        "created_at":
+            datetime.now().strftime(
+                "%d %b %Y"
+            ),
+    }
+
+    if item not in st.session_state.bookmarks:
+
+        st.session_state.bookmarks.append(
+            item
+        )
+
+
+def add_difficult_topic(
+    topic
+):
+
+    topic = clean_text(topic)
+
+    existing = [
+        item["topic"]
+        for item in st.session_state.difficult_topics
+    ]
+
+    if topic and topic not in existing:
+
+        st.session_state.difficult_topics.append(
+            {
+                "topic": topic,
+
+                "subject":
+                    st.session_state.profile["subject"],
+
+                "created_at":
+                    datetime.now().strftime(
+                        "%d %b %Y"
+                    ),
+            }
+        )
+
+
+def record_quiz_result():
+
+    if (
+        not st.session_state.quiz_questions
+        or st.session_state.quiz_result_recorded
+    ):
+        return
+
+    score = sum(
+
+        st.session_state.quiz_answers.get(
+            index
+        ) == question["answer"]
+
+        for index, question
+        in enumerate(
+            st.session_state.quiz_questions
+        )
+    )
+
+    total = len(
+        st.session_state.quiz_questions
+    )
+
+    st.session_state.quiz_history.append(
+        {
+            "chapter":
+                st.session_state.chapter_title,
+
+            "subject":
+                st.session_state.profile["subject"],
+
+            "score":
+                score,
+
+            "total":
+                total,
+
+            "date":
+                datetime.now().strftime(
+                    "%d %b %Y %I:%M %p"
+                ),
+        }
+    )
+
+    st.session_state.quiz_result_recorded = True
+
+
+# =========================================================
+# EXPORT
+# =========================================================
+
+def build_text_export(
+    pack
+):
+
+    lines = [
+
+        "TAMIL STUDY AI — EXAM PACK",
+
+        "=" * 60,
+
+        f"Chapter: {pack['chapter_title']}",
+
+        f"Class: {pack['profile']['class']}",
+
+        f"Board: {pack['profile']['board']}",
+
+        f"Medium: {pack['profile']['medium']}",
+
+        f"Subject: {pack['profile']['subject']}",
+
+        f"Exam Goal: {pack['profile']['exam']}",
+
+        "",
+
+        "SIMPLE TAMIL EXPLANATION",
+
+        "-" * 60,
+
+        re.sub(
+            r"[*#]",
+            "",
+            pack["tamil_explanation"]
+        ),
+
+        "",
+
+        "ENGLISH SUMMARY",
+
+        "-" * 60,
+
+        pack["english_summary"],
+
+        "",
+
+        "KEY POINTS",
+
+        "-" * 60,
+    ]
+
+    for point in pack["key_points"]:
+
+        lines.append(
+            f"- {point}"
+        )
+
+    lines.extend(
+        [
+            "",
+            "KEY TERMS",
+            "-" * 60,
+            ", ".join(
+                pack["key_terms"]
+            ),
+            "",
+            "FORMULAS / EQUATIONS",
+            "-" * 60,
+        ]
+    )
+
+    for formula in pack["formulas"]:
+
+        lines.append(
+            f"- {formula}"
+        )
+
+    for mark in [1, 2, 3, 5]:
+
+        lines.extend(
+            [
+                "",
+                f"{mark}-MARK PRACTICE",
+                "-" * 60,
+            ]
+        )
+
+        for question in pack["questions"][mark]:
+
+            lines.append(
+                f"- {question}"
+            )
+
+    lines.extend(
+        [
+            "",
+            "REVISION PLAN",
+            "-" * 60,
+        ]
+    )
+
+    for item in pack["revision_plan"]:
+
+        lines.append(
+            f"- {item}"
+        )
+
+    return "\n".join(lines)
+
+
+# =========================================================
+# SIDEBAR
+# =========================================================
+
+with st.sidebar:
+
+    st.markdown(
+        "## 📚 Tamil Study AI"
+    )
+
+    st.caption(
+        "Chapter → Exam Preparation"
+    )
+
+    pages = [
+
+        "Home",
+
+        "Create Exam Pack",
+
+        "Chapter Workspace",
+
+        "Practice by Marks",
+
+        "Flashcards",
+
+        "Mock Test",
+
+        "My Progress",
+
+        "Saved & Difficult",
+
+        "About V6",
+    ]
+
+    st.session_state.page = st.radio(
+        "Study",
+        pages,
+        index=pages.index(
+            st.session_state.page
+        ),
+    )
+
+    st.divider()
+
+    st.markdown(
+        "### 🎯 Study Profile"
+    )
+
+    profile = st.session_state.profile
+
+    profile["class"] = st.selectbox(
+        "Class",
+        [str(i) for i in range(1, 13)],
+        index=int(profile["class"]) - 1,
+    )
+
+    profile["board"] = st.selectbox(
+        "Board",
+        [
+            "Tamil Nadu State Board",
+            "CBSE",
+            "Other",
+        ],
+        index=[
+            "Tamil Nadu State Board",
+            "CBSE",
+            "Other",
+        ].index(
+            profile["board"]
+        ),
+    )
+
+    profile["medium"] = st.selectbox(
+        "Medium",
+        [
+            "Tamil Medium",
+            "English Medium",
+            "Bilingual",
+        ],
+        index=[
+            "Tamil Medium",
+            "English Medium",
+            "Bilingual",
+        ].index(
+            profile["medium"]
+        ),
+    )
+
+    profile["subject"] = st.selectbox(
+        "Subject",
+        SUBJECTS,
+        index=SUBJECTS.index(
+            profile["subject"]
+        ),
+    )
+
+    profile["exam"] = st.selectbox(
+        "Exam / Goal",
+        EXAM_GOALS,
+        index=EXAM_GOALS.index(
+            profile["exam"]
+        ),
+    )
+
+    st.divider()
+
+    st.metric(
+        "Study sessions",
+        st.session_state.study_sessions
+    )
+
+    st.metric(
+        "Exam packs",
+        st.session_state.completed_packs
+    )
+
+    st.metric(
+        "Mock tests",
+        len(
+            st.session_state.quiz_history
+        )
+    )
+
+    st.caption(
+        "V6 • No API • No payments"
+    )
+
+
+# =========================================================
+# HERO
+# =========================================================
+
+st.markdown(
+    f"""
+    <div class="hero">
+
+        <h1>📚 Tamil Study AI</h1>
+
+        <p>
+            <strong>
+                Turn one chapter into a structured
+                exam-preparation pack.
+            </strong>
+        </p>
+
+        <p>
+            Class {profile["class"]} ·
+            {profile["board"]} ·
+            {profile["subject"]} ·
+            {profile["exam"]}
+        </p>
+
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# =========================================================
+# HOME
+# =========================================================
+
+if st.session_state.page == "Home":
+
+    st.markdown(
+        "## Start with a chapter"
+    )
+
+    st.info(
+        "Best workflow: add one chapter → create an Exam Pack → "
+        "practice by marks → flashcards → mock test → review mistakes."
+    )
+
+    col1, col2 = st.columns(
+        [1.35, 1]
+    )
+
+    with col1:
+
+        st.markdown(
+            "### 📥 Add your study material"
+        )
+
+        title = st.text_input(
+            "Chapter title",
+            value=st.session_state.chapter_title,
+            placeholder="Example: Photosynthesis",
+        )
+
+        input_mode = st.radio(
+            "Input",
+            [
+                "Paste / type text",
+                "Upload PDF",
+            ],
+            horizontal=True,
+        )
+
+        if input_mode == "Paste / type text":
+
+            text_input = st.text_area(
+                "Paste your textbook/chapter content",
+                value=st.session_state.study_text,
+                height=280,
+                placeholder=(
+                    "Paste the chapter content here. "
+                    "For the best result, include the complete lesson."
+                ),
+            )
+
+            if st.button(
+                "📥 Load Chapter",
+                type="primary",
+                use_container_width=True,
+            ):
+
+                if len(
+                    clean_text(text_input)
+                ) < 80:
+
+                    st.warning(
+                        "Please add more chapter content."
+                    )
+
+                else:
+
+                    load_material(
+                        text_input,
+                        "Pasted text",
+                        title
+                    )
+
+                    st.success(
+                        "Chapter loaded."
+                    )
+
+                    st.session_state.page = (
+                        "Create Exam Pack"
+                    )
+
+                    st.rerun()
+
         else:
-            index = st.session_state.flashcard_index
-            card = cards[index]
 
-            st.caption(f"Card {index + 1} of {len(cards)}")
+            uploaded = st.file_uploader(
+                "Upload a PDF chapter",
+                type=["pdf"],
+            )
+
+            if uploaded:
+
+                if not PDF_AVAILABLE:
+
+                    st.error(
+                        "PDF support is unavailable. "
+                        "Add PyMuPDF to requirements.txt."
+                    )
+
+                elif st.button(
+                    "📥 Read PDF",
+                    type="primary",
+                    use_container_width=True,
+                ):
+
+                    extracted = extract_pdf_text(
+                        uploaded
+                    )
+
+                    if len(extracted) < 80:
+
+                        st.warning(
+                            "Very little text was found in this PDF."
+                        )
+
+                    else:
+
+                        load_material(
+                            extracted,
+                            uploaded.name,
+                            title
+                        )
+
+                        st.success(
+                            "PDF chapter loaded."
+                        )
+
+                        st.session_state.page = (
+                            "Create Exam Pack"
+                        )
+
+                        st.rerun()
+
+    with col2:
+
+        st.markdown(
+            "### 🚀 What you get"
+        )
+
+        features = [
+
+            (
+                "🧠",
+                "Simple understanding",
+                "Structured explanation from your supplied chapter."
+            ),
+
+            (
+                "📝",
+                "1 / 2 / 3 / 5-mark practice",
+                "Practice in mark-based format."
+            ),
+
+            (
+                "🃏",
+                "Flashcards",
+                "Active-recall cards from your chapter."
+            ),
+
+            (
+                "🎯",
+                "Mock test",
+                "Check understanding and review mistakes."
+            ),
+
+            (
+                "📈",
+                "Progress",
+                "Quiz history and difficult topics."
+            ),
+
+            (
+                "⬇️",
+                "Export",
+                "Download your Exam Pack as text."
+            ),
+        ]
+
+        for icon, title_text, description in features:
 
             st.markdown(
                 f"""
-                <div class="flashcard">
-                    <h2>{card[0]}</h2>
-                    <p class="small-muted">Think about your answer before revealing it.</p>
+                <div class="card">
+
+                    <h4>
+                        {icon} {title_text}
+                    </h4>
+
+                    <p>
+                        {description}
+                    </p>
+
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
-            st.write("")
+    st.markdown(
+        "## The core workflow"
+    )
 
-            if st.button(
-                "👁️ Reveal Answer" if not st.session_state.flashcard_revealed else "🙈 Hide Answer",
-                use_container_width=True,
-            ):
-                st.session_state.flashcard_revealed = not st.session_state.flashcard_revealed
-
-            if st.session_state.flashcard_revealed:
-                st.success(card[1])
-
-            p1, p2, p3 = st.columns(3)
-
-            with p1:
-                if st.button("⬅️ Previous", use_container_width=True):
-                    st.session_state.flashcard_index = (index - 1) % len(cards)
-                    st.session_state.flashcard_revealed = False
-                    st.rerun()
-
-            with p2:
-                if st.button("🔄 Restart", use_container_width=True):
-                    st.session_state.flashcard_index = 0
-                    st.session_state.flashcard_revealed = False
-                    st.rerun()
-
-            with p3:
-                if st.button("Next ➡️", use_container_width=True):
-                    st.session_state.flashcard_index = (index + 1) % len(cards)
-                    st.session_state.flashcard_revealed = False
-                    st.rerun()
+    st.markdown(
+        """
+        **Understand → Learn key points → Practice by marks →
+        Recall → Test → Review mistakes**
+        """
+    )
 
 
 # =========================================================
-# PRACTICE
+# CREATE EXAM PACK
 # =========================================================
 
-elif mode == "✍️ Practice":
-    st.title("✍️ Practice Questions")
-    st.write("Write answers in your own words to strengthen your understanding.")
+elif st.session_state.page == "Create Exam Pack":
+
+    st.markdown(
+        "## 🎯 Create My Exam Pack"
+    )
 
     if not st.session_state.study_text:
-        st.info("Add and analyze study material first from **Study Notes**.")
-    elif not can_use("practice"):
-        show_upgrade("practice")
-    else:
-        questions = make_practice_questions(st.session_state.study_text)
-        use_feature("practice")
-        st.caption(f"Free practice sets remaining: {remaining('practice')}")
 
-        for i, question in enumerate(questions, 1):
-            st.markdown(f"### {i}. {question}")
-            st.text_area(
-                f"Answer {i}",
-                key=f"practice_page_{st.session_state.quiz_version}_{i}",
-                height=100,
-                placeholder="Write your answer...",
-            )
-
-        st.success("Tip: Try answering without looking back at your notes first.")
-
-
-# =========================================================
-# TEST YOURSELF
-# =========================================================
-
-elif mode == "🎯 Test Yourself":
-    st.title("🎯 Test Yourself")
-    st.write("Check what you remember with a quick multiple-choice quiz.")
-
-    if not st.session_state.study_text:
-        st.info("Add and analyze study material first from **Study Notes**.")
-    else:
-        count = st.selectbox(
-            "Number of questions",
-            [3, 5, 7, 10],
-            index=1,
+        st.warning(
+            "Load a chapter first from Home."
         )
 
-        if not st.session_state.quiz_questions:
-            st.markdown(
-                """
-                **Quiz tips**
-                - Read every option carefully.
-                - You need to answer every question before submitting.
-                - Your score appears after submission.
-                """
+    else:
+
+        st.markdown(
+            f"""
+            <div class="card">
+
+                <h3>
+                    {st.session_state.chapter_title}
+                </h3>
+
+                <p>
+                    {word_count(st.session_state.study_text):,}
+                    words ·
+                    {st.session_state.source_name or "Study material"}
+                </p>
+
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        c1, c2, c3, c4 = st.columns(4)
+
+        c1.metric(
+            "1-mark",
+            "6"
+        )
+
+        c2.metric(
+            "2-mark",
+            "5"
+        )
+
+        c3.metric(
+            "3-mark",
+            "5"
+        )
+
+        c4.metric(
+            "5-mark",
+            "5"
+        )
+
+        st.markdown(
+            "### Your Exam Pack includes"
+        )
+
+        st.write(
+            "🧠 Simple Tamil · "
+            "📌 Key points · "
+            "🔑 Terms · "
+            "📐 Formulas · "
+            "📝 Mark-wise practice · "
+            "🃏 Flashcards · "
+            "🎯 Mock test · "
+            "📈 Revision plan"
+        )
+
+        if st.button(
+            "🚀 Build My Exam Pack",
+            type="primary",
+            use_container_width=True,
+        ):
+
+            create_exam_pack()
+
+            st.success(
+                "Exam Pack created."
             )
 
-            if st.button("🚀 Generate Quiz", type="primary", use_container_width=True):
-                if not can_use("quizzes"):
-                    show_upgrade("quizzes")
-                else:
-                    use_feature("quizzes")
-                    start_quiz(st.session_state.study_text, count)
-                    st.rerun()
+            st.rerun()
 
-            st.caption(f"Free quizzes remaining: {remaining('quizzes')}")
+        if st.session_state.exam_pack:
+
+            pack = st.session_state.exam_pack
+
+            st.divider()
+
+            left, right = st.columns(2)
+
+            with left:
+
+                st.markdown(
+                    "### 🧠 Simple Tamil Explanation"
+                )
+
+                st.markdown(
+                    pack["tamil_explanation"]
+                )
+
+            with right:
+
+                st.markdown(
+                    "### 🇬🇧 Quick English Summary"
+                )
+
+                st.markdown(
+                    pack["english_summary"]
+                )
+
+            st.markdown(
+                "### 📌 Key Points"
+            )
+
+            for point in pack["key_points"]:
+
+                st.markdown(
+                    f"- {point}"
+                )
+
+            st.markdown(
+                "### 🔑 Key Terms"
+            )
+
+            if pack["key_terms"]:
+
+                st.markdown(
+                    " ".join(
+                        f'<span class="tag">{term}</span>'
+                        for term in pack["key_terms"]
+                    ),
+                    unsafe_allow_html=True,
+                )
+
+            if pack["formulas"]:
+
+                st.markdown(
+                    "### 📐 Formulas / Equations"
+                )
+
+                for formula in pack["formulas"]:
+
+                    st.code(
+                        formula
+                    )
+
+            st.markdown(
+                "### ⚡ Quick Revision"
+            )
+
+            for item in pack["quick_revision"]:
+
+                st.markdown(
+                    f"- {item}"
+                )
+
+            st.markdown(
+                "### 🗓️ Revision Plan"
+            )
+
+            for item in pack["revision_plan"]:
+
+                st.markdown(
+                    f"- {item}"
+                )
+
+            st.download_button(
+                "⬇️ Download Exam Pack (.txt)",
+                data=build_text_export(pack),
+                file_name="tamil_study_ai_exam_pack.txt",
+                mime="text/plain",
+                use_container_width=True,
+            )
+
+
+# =========================================================
+# CHAPTER WORKSPACE
+# =========================================================
+
+elif st.session_state.page == "Chapter Workspace":
+
+    st.markdown(
+        "## 📖 Chapter Workspace"
+    )
+
+    if not st.session_state.study_text:
+
+        st.warning(
+            "Load a chapter first."
+        )
+
+    else:
+
+        st.markdown(
+            f"### {st.session_state.chapter_title}"
+        )
+
+        c1, c2, c3 = st.columns(3)
+
+        c1.metric(
+            "Words",
+            f"{word_count(st.session_state.study_text):,}"
+        )
+
+        c2.metric(
+            "Key points",
+            len(
+                extract_key_points(
+                    st.session_state.study_text
+                )
+            )
+        )
+
+        c3.metric(
+            "Key terms",
+            len(
+                extract_key_terms(
+                    st.session_state.study_text
+                )
+            )
+        )
+
+        st.divider()
+
+        st.markdown(
+            "### 🧠 Simple Tamil Explanation"
+        )
+
+        st.markdown(
+            tamil_explanation(
+                st.session_state.study_text,
+                profile["subject"]
+            )
+        )
+
+        st.markdown(
+            "### 📌 Key Points"
+        )
+
+        for point in extract_key_points(
+            st.session_state.study_text,
+            10
+        ):
+
+            st.markdown(
+                f"- {point}"
+            )
+
+        st.markdown(
+            "### 🔑 Key Terms"
+        )
+
+        st.write(
+            ", ".join(
+                extract_key_terms(
+                    st.session_state.study_text
+                )
+            )
+        )
+
+        st.markdown(
+            "### 🇬🇧 English Summary"
+        )
+
+        st.markdown(
+            english_summary(
+                st.session_state.study_text
+            )
+        )
+
+        if st.button(
+            "🔖 Save chapter as bookmark"
+        ):
+
+            save_bookmark(
+                st.session_state.chapter_title,
+                st.session_state.study_text[:1200]
+            )
+
+            st.success(
+                "Saved."
+            )
+
+
+# =========================================================
+# PRACTICE BY MARKS
+# =========================================================
+
+elif st.session_state.page == "Practice by Marks":
+
+    st.markdown(
+        "## 📝 Practice by Marks"
+    )
+
+    if not st.session_state.exam_pack:
+
+        st.warning(
+            "Create an Exam Pack first."
+        )
+
+    else:
+
+        pack = st.session_state.exam_pack
+
+        tabs = st.tabs(
+            [
+                "1 Mark",
+                "2 Marks",
+                "3 Marks",
+                "5 Marks",
+            ]
+        )
+
+        for tab, mark in zip(
+            tabs,
+            [1, 2, 3, 5]
+        ):
+
+            with tab:
+
+                st.caption(
+                    "Exam-style practice generated from your supplied chapter. "
+                    "These are not predictions of actual exam questions."
+                )
+
+                for index, question in enumerate(
+                    pack["questions"][mark],
+                    start=1
+                ):
+
+                    with st.container(
+                        border=True
+                    ):
+
+                        st.markdown(
+                            f"**Q{index}. {question}**"
+                        )
+
+                        with st.expander(
+                            "💡 Model-answer guidance"
+                        ):
+
+                            st.write(
+                                model_answer_for_question(
+                                    question,
+                                    st.session_state.study_text,
+                                    mark
+                                )
+                            )
+
+                        if st.button(
+                            "🔖 Save question",
+                            key=f"save_{mark}_{index}",
+                        ):
+
+                            save_bookmark(
+                                f"{mark}-mark: {question}",
+                                model_answer_for_question(
+                                    question,
+                                    st.session_state.study_text,
+                                    mark
+                                )
+                            )
+
+                            st.success(
+                                "Saved."
+                            )
+
+
+# =========================================================
+# FLASHCARDS
+# =========================================================
+
+elif st.session_state.page == "Flashcards":
+
+    st.markdown(
+        "## 🃏 Flashcards"
+    )
+
+    if not st.session_state.flashcards:
+
+        st.warning(
+            "Create an Exam Pack first."
+        )
+
+    else:
+
+        cards = st.session_state.flashcards
+
+        index = st.session_state.flashcard_index
+
+        card = cards[index]
+
+        st.caption(
+            f"Card {index + 1} of {len(cards)}"
+        )
+
+        answer = (
+            card["back"]
+            if st.session_state.flashcard_revealed
+            else "Click Reveal Answer"
+        )
+
+        st.markdown(
+            f"""
+            <div class="flashcard">
+
+                <div class="front">
+                    {card["front"]}
+                </div>
+
+                <div class="back">
+                    {answer}
+                </div>
+
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.write("")
+
+        c1, c2, c3 = st.columns(3)
+
+        if c1.button(
+            "⬅️ Previous",
+            use_container_width=True
+        ):
+
+            st.session_state.flashcard_index = max(
+                0,
+                index - 1
+            )
+
+            st.session_state.flashcard_revealed = False
+
+            st.rerun()
+
+        if c2.button(
+            "🙈 Hide"
+            if st.session_state.flashcard_revealed
+            else "👀 Reveal Answer",
+            type="primary",
+            use_container_width=True,
+        ):
+
+            st.session_state.flashcard_revealed = (
+                not st.session_state.flashcard_revealed
+            )
+
+            st.rerun()
+
+        if c3.button(
+            "Next ➡️",
+            use_container_width=True
+        ):
+
+            st.session_state.flashcard_index = min(
+                len(cards) - 1,
+                index + 1
+            )
+
+            st.session_state.flashcard_revealed = False
+
+            st.rerun()
+
+
+# =========================================================
+# MOCK TEST
+# =========================================================
+
+elif st.session_state.page == "Mock Test":
+
+    st.markdown(
+        "## 🎯 Mock Test"
+    )
+
+    if not st.session_state.study_text:
+
+        st.warning(
+            "Load a chapter first."
+        )
+
+    else:
+
+        if not st.session_state.quiz_questions:
+
+            st.session_state.quiz_questions = (
+                build_quiz_questions(
+                    st.session_state.study_text
+                )
+            )
+
+        questions = (
+            st.session_state.quiz_questions
+        )
+
+        st.caption(
+            "Questions are generated from your supplied material. "
+            "They are for practice, not exam prediction."
+        )
+
+        if st.button(
+            "🔄 New Mock Test"
+        ):
+
+            st.session_state.quiz_questions = (
+                build_quiz_questions(
+                    st.session_state.study_text
+                )
+            )
+
+            st.session_state.quiz_answers = {}
+
+            st.session_state.quiz_submitted = False
+
+            st.session_state.quiz_result_recorded = False
+
+            st.session_state.quiz_version += 1
+
+            st.rerun()
+
+        for index, question in enumerate(
+            questions
+        ):
+
+            st.markdown(
+                f"""
+                <div class="question-box">
+
+                    <strong>
+                        Q{index + 1}.
+                        {question["question"]}
+                    </strong>
+
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            selected = st.radio(
+                "Choose one",
+                question["options"],
+                index=None,
+                key=(
+                    f"quiz_"
+                    f"{st.session_state.quiz_version}_"
+                    f"{index}"
+                ),
+                label_visibility="collapsed",
+            )
+
+            st.session_state.quiz_answers[
+                index
+            ] = selected
+
+        if st.button(
+            "✅ Submit Test",
+            type="primary",
+            use_container_width=True,
+        ):
+
+            unanswered = any(
+                st.session_state.quiz_answers.get(
+                    index
+                ) is None
+
+                for index in range(
+                    len(questions)
+                )
+            )
+
+            if unanswered:
+
+                st.warning(
+                    "Please answer every question."
+                )
+
+            else:
+
+                st.session_state.quiz_submitted = True
+
+                record_quiz_result()
+
+                st.rerun()
+
+        if st.session_state.quiz_submitted:
+
+            score = sum(
+
+                st.session_state.quiz_answers.get(
+                    index
+                ) == question["answer"]
+
+                for index, question
+                in enumerate(questions)
+            )
+
+            total = len(questions)
+
+            percentage = round(
+                score / total * 100
+            )
+
+            st.success(
+                f"Score: {score}/{total} "
+                f"({percentage}%)"
+            )
+
+            st.markdown(
+                "### 🔍 Review"
+            )
+
+            for index, question in enumerate(
+                questions
+            ):
+
+                user_answer = (
+                    st.session_state.quiz_answers.get(
+                        index
+                    )
+                )
+
+                if user_answer == question["answer"]:
+
+                    st.markdown(
+                        f"✅ Q{index + 1}: Correct"
+                    )
+
+                else:
+
+                    st.markdown(
+                        f"""
+                        ❌ Q{index + 1}: Review this question
+
+                        **Correct answer:**
+                        {question["answer"]}
+                        """
+                    )
+
+                    if st.button(
+                        "📌 Mark as difficult",
+                        key=f"difficult_{index}",
+                    ):
+
+                        add_difficult_topic(
+                            f"{st.session_state.chapter_title} "
+                            f"— Q{index + 1}"
+                        )
+
+                        st.success(
+                            "Added to difficult topics."
+                        )
+
+
+# =========================================================
+# PROGRESS
+# =========================================================
+
+elif st.session_state.page == "My Progress":
+
+    st.markdown(
+        "## 📈 My Progress"
+    )
+
+    history = (
+        st.session_state.quiz_history
+    )
+
+    total_tests = len(history)
+
+    total_questions = sum(
+        item["total"]
+        for item in history
+    )
+
+    total_correct = sum(
+        item["score"]
+        for item in history
+    )
+
+    average = (
+        round(
+            total_correct /
+            total_questions *
+            100
+        )
+        if total_questions
+        else 0
+    )
+
+    best = max(
+        [
+            round(
+                item["score"] /
+                item["total"] *
+                100
+            )
+
+            for item in history
+            if item["total"]
+        ]
+        or [0]
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    c1.metric(
+        "Mock tests",
+        total_tests
+    )
+
+    c2.metric(
+        "Questions",
+        total_questions
+    )
+
+    c3.metric(
+        "Average",
+        f"{average}%"
+    )
+
+    c4.metric(
+        "Best",
+        f"{best}%"
+    )
+
+    st.markdown(
+        "### 📚 Study activity"
+    )
+
+    c1, c2 = st.columns(2)
+
+    c1.metric(
+        "Study sessions",
+        st.session_state.study_sessions
+    )
+
+    c2.metric(
+        "Exam packs",
+        st.session_state.completed_packs
+    )
+
+    if history:
+
+        st.markdown(
+            "### 🧪 Quiz history"
+        )
+
+        for item in reversed(history):
+
+            percentage = round(
+                item["score"] /
+                item["total"] *
+                100
+            )
+
+            st.markdown(
+                f"""
+                <div class="card">
+
+                    <strong>
+                        {item["chapter"]}
+                    </strong>
+
+                    <br>
+
+                    {item["subject"]}
+                    ·
+                    {item["date"]}
+
+                    <br>
+
+                    Score:
+                    <strong>
+                        {item["score"]}/{item["total"]}
+                        ({percentage}%)
+                    </strong>
+
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    else:
+
+        st.info(
+            "Take your first mock test to start building progress."
+        )
+
+    if st.session_state.difficult_topics:
+
+        st.markdown(
+            "### 🔁 Topics to revisit"
+        )
+
+        for item in (
+            st.session_state.difficult_topics
+        ):
+
+            st.markdown(
+                f"- {item['topic']} "
+                f"({item['subject']})"
+            )
+
+
+# =========================================================
+# SAVED & DIFFICULT
+# =========================================================
+
+elif st.session_state.page == "Saved & Difficult":
+
+    st.markdown(
+        "## 🔖 Saved & Difficult"
+    )
+
+    tab1, tab2 = st.tabs(
+        [
+            "Saved",
+            "Difficult Topics",
+        ]
+    )
+
+    with tab1:
+
+        if not st.session_state.bookmarks:
+
+            st.info(
+                "Nothing saved yet."
+            )
 
         else:
-            questions = st.session_state.quiz_questions
 
-            st.progress(
-                len(st.session_state.quiz_answers) / max(len(questions), 1),
-                text=f"{len(st.session_state.quiz_answers)} / {len(questions)} answered",
+            for index, item in enumerate(
+                st.session_state.bookmarks
+            ):
+
+                with st.expander(
+                    f"{item['label']} — "
+                    f"{item['subject']}"
+                ):
+
+                    st.write(
+                        item["content"]
+                    )
+
+                    st.caption(
+                        item["created_at"]
+                    )
+
+                    if st.button(
+                        "Remove",
+                        key=f"remove_bookmark_{index}",
+                    ):
+
+                        st.session_state.bookmarks.pop(
+                            index
+                        )
+
+                        st.rerun()
+
+    with tab2:
+
+        if not st.session_state.difficult_topics:
+
+            st.info(
+                "No difficult topics yet."
             )
 
-            for i, question in enumerate(questions):
-                key = f"quiz_{st.session_state.quiz_version}_{i}"
+        else:
 
-                choice = st.radio(
-                    f"**{i + 1}. {question['q']}**",
-                    question["options"],
-                    index=None,
-                    key=key,
-                )
+            for index, item in enumerate(
+                st.session_state.difficult_topics
+            ):
 
-                if choice is not None:
-                    st.session_state.quiz_answers[i] = choice
+                with st.container(
+                    border=True
+                ):
 
-            answered = len(st.session_state.quiz_answers)
-            all_answered = answered == len(questions)
-
-            st.write("")
-
-            if not st.session_state.quiz_submitted:
-                if not all_answered:
-                    st.warning(
-                        f"Please answer all questions before submitting. "
-                        f"{len(questions) - answered} remaining."
+                    st.write(
+                        f"📌 **{item['topic']}**"
                     )
 
-                if st.button(
-                    "✅ Submit Quiz",
-                    type="primary",
-                    disabled=not all_answered,
-                    use_container_width=True,
-                ):
-                    st.session_state.quiz_submitted = True
-                    st.rerun()
-
-            if st.session_state.quiz_submitted:
-                score = 0
-
-                for i, question in enumerate(questions):
-                    if st.session_state.quiz_answers.get(i) == question["answer"]:
-                        score += 1
-
-                percentage = int((score / len(questions)) * 100)
-
-                quiz_record_key = f"quiz_recorded_{st.session_state.quiz_version}"
-                if not st.session_state.get(quiz_record_key, False):
-                    record_quiz_result(
-                        score,
-                        len(questions),
-                        st.session_state.selected_subject,
+                    st.caption(
+                        f"{item['subject']} · "
+                        f"{item['created_at']}"
                     )
-                    st.session_state[quiz_record_key] = True
 
-                st.markdown("---")
-                st.subheader("🏆 Your Result")
+                    if st.button(
+                        "Remove",
+                        key=f"remove_difficult_{index}",
+                    ):
 
-                r1, r2 = st.columns(2)
+                        st.session_state.difficult_topics.pop(
+                            index
+                        )
 
-                with r1:
-                    st.metric("Score", f"{score}/{len(questions)}")
-
-                with r2:
-                    st.metric("Percentage", f"{percentage}%")
-
-                if percentage >= 80:
-                    st.success("Excellent work! 🎉")
-                elif percentage >= 50:
-                    st.info("Good job! Review the missed questions once more.")
-                else:
-                    st.warning("Keep practicing. You can improve with another attempt!")
-
-                st.markdown("### 🧠 Mark a topic for extra revision")
-                difficult_topic = st.text_input(
-                    "Topic to revise",
-                    placeholder="Example: Photosynthesis",
-                    key=f"difficult_topic_{st.session_state.quiz_version}",
-                )
-                if st.button(
-                    "📌 Save to Difficult Topics",
-                    key=f"save_difficult_{st.session_state.quiz_version}",
-                    use_container_width=True,
-                ):
-                    if difficult_topic.strip():
-                        add_difficult_topic(difficult_topic)
-                        st.success("Saved to My Progress.")
-                    else:
-                        st.warning("Enter a topic first.")
-
-                st.markdown("### 📋 Answer Review")
-
-                for i, question in enumerate(questions):
-                    user_answer = st.session_state.quiz_answers.get(i)
-                    correct = user_answer == question["answer"]
-
-                    if correct:
-                        st.success(f"**{i + 1}. Correct**")
-                    else:
-                        st.error(f"**{i + 1}. Incorrect**")
-
-                    st.write(f"**Question:** {question['q']}")
-                    st.write(f"Your answer: {user_answer}")
-                    st.write(f"Correct answer: {question['answer']}")
-                    st.caption(question["explanation"])
-
-                st.write("")
-
-                if st.button("🔄 Try Another Quiz", use_container_width=True):
-                    reset_quiz()
-                    st.rerun()
+                        st.rerun()
 
 
 # =========================================================
-# Footer
+# ABOUT
 # =========================================================
 
-st.markdown("---")
-st.caption("📚 Tamil Study AI • Version 5.1 • Free + Premium • No API key required")
+elif st.session_state.page == "About V6":
+
+    st.markdown(
+        "## ℹ️ About Tamil Study AI V6"
+    )
+
+    st.markdown(
+        """
+### 🎯 Product workflow
+
+**Chapter → Exam Pack → Practice → Recall → Test → Review**
+
+### V6 includes
+
+- No API key required
+- No payment system
+- Chapter text input
+- Text-based PDF input
+- Simple Tamil explanation
+- English summary
+- Key points
+- Key terms
+- Formula/equation extraction
+- 1-mark practice
+- 2-mark practice
+- 3-mark practice
+- 5-mark practice
+- Model-answer guidance
+- Flashcards
+- Chapter-based mock tests
+- Quiz history
+- Difficult-topic tracking
+- Saved study items
+- Exam Pack export
+
+### ⚠️ Important limitation
+
+This is intentionally the **no-API version**.
+
+It uses local rule-based processing instead of a cloud AI model.
+
+Therefore, it does **not** claim to predict the real exam or guarantee that a generated question will appear in an exam.
+
+The questions are practice questions generated from the material supplied by the student.
+
+### 🚀 Future upgrades
+
+Later versions can add:
+
+- Secure student accounts
+- Cloud-saved progress
+- Tamil Nadu syllabus/chapter mapping
+- Previous-year question-paper analysis
+- Stronger AI generation
+- Better Tamil explanations
+- Teacher/parent features
+- Paid plans
+
+Payments are intentionally **not included in V6**.
+"""
+    )
+
+
+# =========================================================
+# FOOTER
+# =========================================================
+
+st.markdown(
+    """
+    <div class="footer">
+
+        Tamil Study AI V6 ·
+        No API key required ·
+        No payment system ·
+        Chapter-based exam preparation
+
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
