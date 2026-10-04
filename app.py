@@ -150,6 +150,14 @@ defaults = {
     "revision_topic": "",
     "quiz_history": [],
     "difficult_topics": [],
+    "plan": "Free",
+    "usage": {
+        "study_notes": 0,
+        "practice": 0,
+        "flashcards": 0,
+        "quizzes": 0,
+        "revision": 0,
+    },
 }
 
 for key, value in defaults.items():
@@ -720,6 +728,84 @@ def remove_difficult_topic(topic):
 
 
 # =========================================================
+# Monetization
+# =========================================================
+
+PLAN_LIMITS = {
+    "study_notes": 5,
+    "practice": 5,
+    "flashcards": 5,
+    "quizzes": 3,
+    "revision": 2,
+}
+
+PLAN_LABELS = {
+    "study_notes": "Study Notes / analyses",
+    "practice": "Practice sets",
+    "flashcards": "Flashcard sets",
+    "quizzes": "Quizzes",
+    "revision": "Exam Revision packs",
+}
+
+def is_premium():
+    return st.session_state.plan == "Premium"
+
+def can_use(feature):
+    if is_premium():
+        return True
+    return st.session_state.usage.get(feature, 0) < PLAN_LIMITS[feature]
+
+def use_feature(feature):
+    if not is_premium():
+        st.session_state.usage[feature] = st.session_state.usage.get(feature, 0) + 1
+
+def remaining(feature):
+    if is_premium():
+        return "Unlimited"
+    return max(0, PLAN_LIMITS[feature] - st.session_state.usage.get(feature, 0))
+
+def show_upgrade(feature):
+    used = st.session_state.usage.get(feature, 0)
+    limit = PLAN_LIMITS[feature]
+    st.warning(
+        f"⭐ You have reached the Free limit for {PLAN_LABELS[feature]} ({used}/{limit})."
+    )
+    st.markdown(
+        "### ⭐ Upgrade to Premium — ₹49/month\n"
+        "Get unlimited study tools, unlimited quizzes, unlimited revision packs, "
+        "and unlimited saved study material."
+    )
+    st.button("🚀 Upgrade to Premium", key=f"upgrade_{feature}", use_container_width=True)
+    st.caption("Payment is not connected yet — this button is a preview of the upgrade flow.")
+
+def pricing_ui():
+    st.markdown("### 💎 Choose your plan")
+    free, premium = st.columns(2)
+    with free:
+        st.markdown("#### 🆓 Free")
+        st.markdown("# ₹0")
+        st.caption("Try Tamil Study AI before paying.")
+        for feature, limit in PLAN_LIMITS.items():
+            st.markdown(f"✓ {limit} {PLAN_LABELS[feature]} / month")
+        st.markdown("✓ All subjects")
+        st.markdown("✓ Progress tracking")
+    with premium:
+        st.markdown("#### ⭐ Premium")
+        st.markdown("# ₹49 / month")
+        st.caption("Unlimited study and revision.")
+        st.markdown("✓ Unlimited Study Notes")
+        st.markdown("✓ Unlimited Practice Questions")
+        st.markdown("✓ Unlimited Flashcards")
+        st.markdown("✓ Unlimited Quizzes")
+        st.markdown("✓ Unlimited Exam Revision")
+        st.markdown("✓ Unlimited saved study material")
+        st.markdown("✓ Full progress tracking")
+        st.button("🚀 Upgrade to Premium", key="upgrade_pricing", type="primary", use_container_width=True)
+        st.caption("Payment coming in the next release.")
+
+
+
+# =========================================================
 # Sidebar
 # =========================================================
 
@@ -735,6 +821,7 @@ with st.sidebar:
         [
             "🏠 Home",
             "📈 My Progress",
+            "💎 Premium",
             "📊 My Subjects",
             "📄 Study Notes",
             "📝 Exam Revision",
@@ -744,6 +831,13 @@ with st.sidebar:
         ],
         index=0,
     )
+
+    st.divider()
+    if is_premium():
+        st.success("⭐ Premium plan")
+    else:
+        st.markdown("**🆓 Free plan**")
+        st.caption(f"Notes {remaining("study_notes")} • Quizzes {remaining("quizzes")} left")
 
     st.divider()
     st.markdown("### 📚 Current subject")
@@ -841,6 +935,9 @@ if mode == "🏠 Home":
     with q3:
         st.markdown("**⚡ Simple & fast**")
         st.caption("No API key or complicated setup is required.")
+
+    st.markdown("---")
+    pricing_ui()
 
     st.markdown("### How it works")
 
@@ -969,6 +1066,21 @@ if mode == "📈 My Progress":
 
 
 # =========================================================
+# PREMIUM
+# =========================================================
+
+if mode == "💎 Premium":
+    st.title("💎 Tamil Study AI Premium")
+    st.write("Study without running into the Free plan limits.")
+    pricing_ui()
+
+    st.markdown("---")
+    st.subheader("📊 Your Free usage")
+    for feature, limit in PLAN_LIMITS.items():
+        used = st.session_state.usage.get(feature, 0)
+        st.progress(min(used / limit, 1.0), text=f"{PLAN_LABELS[feature]}: {used}/{limit}")
+
+# =========================================================
 # MY SUBJECTS
 # =========================================================
 
@@ -1057,6 +1169,11 @@ elif mode == "📝 Exam Revision":
     if not revision_text:
         st.info("Add and analyze study material first from Study Notes.")
     else:
+        if not can_use("revision"):
+            show_upgrade("revision")
+            st.stop()
+        use_feature("revision")
+        st.caption(f"Free revision packs remaining: {remaining('revision')}")
         topic_name = st.session_state.selected_subject
 
         st.markdown(
@@ -1148,7 +1265,10 @@ elif mode == "📄 Study Notes":
 
         if not text:
             st.warning("Please add some study material first.")
+        elif not can_use("study_notes"):
+            show_upgrade("study_notes")
         else:
+            use_feature("study_notes")
             st.session_state.study_text = text
             st.session_state.analysis_done = True
             save_to_subject(selected_subject, text)
@@ -1158,6 +1278,7 @@ elif mode == "📄 Study Notes":
                 f"Your study material is ready and saved under "
                 f"{SUBJECT_ICONS[selected_subject]} {selected_subject}!"
             )
+            st.caption(f"Free analyses remaining: {remaining('study_notes')}")
 
     if st.session_state.study_text:
         study_text = st.session_state.study_text
@@ -1253,7 +1374,12 @@ elif mode == "🃏 Flashcards":
         st.info("Add and analyze study material first from **Study Notes**.")
     else:
         if not st.session_state.flashcards:
+            if not can_use("flashcards"):
+                show_upgrade("flashcards")
+                st.stop()
+            use_feature("flashcards")
             load_flashcards(st.session_state.study_text)
+            st.caption(f"Free flashcard sets remaining: {remaining('flashcards')}")
 
         cards = st.session_state.flashcards
 
@@ -1317,8 +1443,12 @@ elif mode == "✍️ Practice":
 
     if not st.session_state.study_text:
         st.info("Add and analyze study material first from **Study Notes**.")
+    elif not can_use("practice"):
+        show_upgrade("practice")
     else:
         questions = make_practice_questions(st.session_state.study_text)
+        use_feature("practice")
+        st.caption(f"Free practice sets remaining: {remaining('practice')}")
 
         for i, question in enumerate(questions, 1):
             st.markdown(f"### {i}. {question}")
@@ -1360,8 +1490,14 @@ elif mode == "🎯 Test Yourself":
             )
 
             if st.button("🚀 Generate Quiz", type="primary", use_container_width=True):
-                start_quiz(st.session_state.study_text, count)
-                st.rerun()
+                if not can_use("quizzes"):
+                    show_upgrade("quizzes")
+                else:
+                    use_feature("quizzes")
+                    start_quiz(st.session_state.study_text, count)
+                    st.rerun()
+
+            st.caption(f"Free quizzes remaining: {remaining('quizzes')}")
 
         else:
             questions = st.session_state.quiz_questions
@@ -1486,4 +1622,4 @@ elif mode == "🎯 Test Yourself":
 # =========================================================
 
 st.markdown("---")
-st.caption("📚 Tamil Study AI • Version 5.1 • No API key required")
+st.caption("📚 Tamil Study AI • Version 5.1 • Free + Premium • No API key required")
