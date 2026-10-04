@@ -4,8 +4,8 @@ import random
 import re
 
 # =========================================================
-# Tamil Study AI V4
-# No API key required
+# Tamil Study AI V4.1
+# Professional UI refresh • No API key required
 # =========================================================
 
 st.set_page_config(
@@ -86,6 +86,45 @@ st.markdown(
 
     footer {
         visibility: hidden;
+    }
+
+    .brand-pill {
+        display: inline-block;
+        padding: .35rem .75rem;
+        border-radius: 999px;
+        border: 1px solid rgba(128,128,128,.22);
+        font-size: .82rem;
+        margin-bottom: .8rem;
+    }
+
+    .hero-badge {
+        font-size: .9rem;
+        font-weight: 600;
+        opacity: .78;
+        margin-bottom: .6rem;
+    }
+
+    .feature-card p {
+        line-height: 1.55;
+    }
+
+    @media (max-width: 700px) {
+        .hero {
+            padding: 1.4rem 1.1rem;
+            border-radius: 18px;
+        }
+
+        .hero h1 {
+            font-size: 2.15rem;
+        }
+
+        .hero p {
+            font-size: 1rem;
+        }
+
+        .feature-card {
+            min-height: auto;
+        }
     }
     </style>
     """,
@@ -564,7 +603,8 @@ def load_flashcards(text):
 
 with st.sidebar:
     st.markdown("## 📚 Tamil Study AI")
-    st.caption("No API key required")
+    st.caption("Simple study tools • Tamil-friendly learning")
+    st.markdown('<div class="brand-pill">V4.1 • No API required</div>', unsafe_allow_html=True)
 
     st.divider()
 
@@ -595,14 +635,15 @@ if mode == "🏠 Home":
     st.markdown(
         """
         <div class="hero">
+            <div class="hero-badge">🇮🇳 YOUR SIMPLE STUDY WORKSPACE</div>
             <h1>📚 Tamil Study AI</h1>
-            <p>Learn smarter. Understand better. Revise faster — with simple study tools and Tamil explanations.</p>
+            <p>Understand lessons in simple Tamil, revise important ideas, and test yourself — all in one place.</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    st.markdown("### Your personal study workspace")
+    st.markdown("### Everything you need for a quick revision session")
 
     c1, c2, c3 = st.columns(3)
 
@@ -611,7 +652,7 @@ if mode == "🏠 Home":
             """
             <div class="feature-card">
                 <h3>📄 Study Notes</h3>
-                <p>Paste your lesson or upload a PDF and turn it into organized revision material.</p>
+                <p>Paste a lesson or upload a PDF and turn it into clear revision material with Tamil support.</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -622,7 +663,7 @@ if mode == "🏠 Home":
             """
             <div class="feature-card">
                 <h3>🃏 Flashcards</h3>
-                <p>Review important concepts one card at a time and check your understanding.</p>
+                <p>Review important concepts one card at a time and reveal the answer when you are ready.</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -633,11 +674,24 @@ if mode == "🏠 Home":
             """
             <div class="feature-card">
                 <h3>🎯 Test Yourself</h3>
-                <p>Take a multiple-choice quiz and see your score immediately.</p>
+                <p>Take a quick multiple-choice quiz, see your score, and review your mistakes.</p>
             </div>
             """,
             unsafe_allow_html=True,
         )
+
+    st.markdown("### Why use Tamil Study AI?")
+
+    q1, q2, q3 = st.columns(3)
+    with q1:
+        st.markdown("**🇮🇳 Tamil-friendly**")
+        st.caption("Understand difficult study ideas with simple Tamil explanations.")
+    with q2:
+        st.markdown("**🔑 Revision focused**")
+        st.caption("Key points, vocabulary, flashcards and practice in one workflow.")
+    with q3:
+        st.markdown("**⚡ Simple & fast**")
+        st.caption("No API key or complicated setup is required.")
 
     st.markdown("### How it works")
 
@@ -1009,4 +1063,4 @@ elif mode == "🎯 Test Yourself":
 # =========================================================
 
 st.markdown("---")
-st.caption("📚 Tamil Study AI • Version 4.0 • No API key required")
+st.caption("📚 Tamil Study AI • Version 4.1 • No API key required")
